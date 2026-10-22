@@ -1,0 +1,570 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Every row carries tenantId (one tenant = one centre/clinic = one SaaS customer).
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  DOCTOR
+  RECEPTION
+  THERAPIST
+  ACCOUNTANT
+}
+
+enum MachineStatus {
+  OPERATIONAL
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PackageStatus {
+  ACTIVE
+  EXPIRED
+  COMPLETED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum InvoiceKind {
+  INVOICE
+  CREDIT_NOTE
+}
+
+enum PaymentKind {
+  PAYMENT
+  REFUND
+}
+
+enum TaxCategory {
+  STANDARD // 5%
+  ZERO
+  EXEMPT
+}
+
+enum ResourceKind {
+  MACHINE
+  THERAPIST
+  ROOM
+}
+
+enum FollowUpType {
+  REVIEW
+  PACKAGE_EXPIRY
+  CALLBACK
+  PAYMENT_DUE
+}
+
+enum TaskStatus {
+  OPEN
+  DONE
+  SKIPPED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  CONSULT_BOOKED
+  CONVERTED
+  LOST
+}
+
+enum DocKind {
+  CONSENT
+  PHOTO_BEFORE
+  PHOTO_AFTER
+  REPORT
+  OTHER
+}
+
+model Tenant {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  trn           String?
+  address       String?
+  phone         String?
+  email         String?
+  currency      String   @default("AED")
+  vatRate       Decimal  @default(5) @db.Decimal(5, 2)
+  openMin       Int      @default(540) // 09:00, minutes from midnight
+  closeMin      Int      @default(1260) // 21:00
+  slotMin       Int      @default(15)
+  invoicePrefix String   @default("INV")
+  // Sequences are incremented atomically => gap-free, sequential document numbers (UAE FTA requirement for tax invoices).
+  clientSeq     Int      @default(0)
+  invoiceSeq    Int      @default(0)
+  creditSeq     Int      @default(0)
+  receiptSeq    Int      @default(0)
+  createdAt     DateTime @default(now())
+}
+
+model Branch {
+  id       String    @id @default(cuid())
+  tenantId String
+  name     String
+  rooms    Room[]
+  machines Machine[]
+  @@index([tenantId])
+}
+
+model Room {
+  id           String        @id @default(cuid())
+  tenantId     String
+  branchId     String
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  name         String
+  active       Boolean       @default(true)
+  machines     Machine[]
+  appointments Appointment[]
+  @@unique([tenantId, branchId, name])
+}
+
+model MachineType {
+  id         String      @id @default(cuid())
+  tenantId   String
+  name       String
+  machines   Machine[]
+  treatments Treatment[]
+  @@unique([tenantId, name])
+}
+
+model Machine {
+  id            String        @id @default(cuid())
+  tenantId      String
+  branchId      String
+  branch        Branch        @relation(fields: [branchId], references: [id])
+  machineTypeId String
+  type          MachineType   @relation(fields: [machineTypeId], references: [id])
+  roomId        String?
+  room          Room?         @relation(fields: [roomId], references: [id])
+  code          String
+  serialNo      String?
+  brand         String?
+  installedAt   DateTime?
+  lastServiceAt DateTime?
+  nextServiceAt DateTime?
+  notes         String?
+  status        MachineStatus @default(OPERATIONAL)
+  appointments  Appointment[]
+  @@unique([tenantId, code])
+}
+
+model User {
+  id            String           @id @default(cuid())
+  tenantId      String
+  email         String
+  name          String
+  phone         String?
+  designation   String?
+  gender        String?
+  color         String?
+  commissionPct Decimal?         @db.Decimal(5, 2)
+  passwordHash  String
+  role          Role
+  active        Boolean          @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime         @default(now())
+  skills        TherapistSkill[]
+  appointments  Appointment[]
+  consultations Consultation[]
+  @@unique([tenantId, email])
+}
+
+model Treatment {
+  id            String                @id @default(cuid())
+  tenantId      String
+  name          String
+  code          String?
+  category      String                @default("Body Contouring")
+  description   String?
+  color         String?
+  machineTypeId String?
+  machineType   MachineType?          @relation(fields: [machineTypeId], references: [id])
+  durationMin   Int
+  bufferMin     Int                   @default(10)
+  price         Decimal               @default(0) @db.Decimal(10, 2)
+  taxCategory   TaxCategory           @default(STANDARD)
+  active        Boolean               @default(true)
+  skills        TherapistSkill[]
+  templateItems PackageTemplateItem[]
+  packageItems  ClientPackageItem[]
+  appointments  Appointment[]
+  @@unique([tenantId, name])
+}
+
+model TherapistSkill {
+  userId      String
+  treatmentId String
+  user        User      @relation(fields: [userId], references: [id])
+  treatment   Treatment @relation(fields: [treatmentId], references: [id])
+  @@id([userId, treatmentId])
+}
+
+model Client {
+  id                 String          @id @default(cuid())
+  tenantId           String
+  clientNo           String
+  title              String?
+  name               String
+  mobile             String
+  altPhone           String?
+  email              String?
+  dob                DateTime?
+  gender             String?
+  nationality        String?
+  emiratesId         String?
+  address            String?
+  occupation         String?
+  source             String?
+  referredBy         String?
+  emergencyName      String?
+  emergencyRelation  String?
+  emergencyPhone     String?
+  medicalNotes       String?
+  conditions         String?
+  allergies          String?
+  medications        String?
+  contraindications  String?
+  goal               String?
+  targetWeightKg     Float?
+  consentSigned      Boolean         @default(false)
+  consentSignedAt    DateTime?
+  photoConsent       Boolean         @default(false)
+  whatsappOptIn      Boolean         @default(true)
+  marketingOptIn     Boolean         @default(false)
+  vip                Boolean         @default(false)
+  active             Boolean         @default(true)
+  reviewIntervalDays Int             @default(15)
+  nextReviewDate     DateTime?
+  createdAt          DateTime        @default(now())
+  measurements       Measurement[]
+  consultations      Consultation[]
+  packages           ClientPackage[]
+  appointments       Appointment[]
+  invoices           Invoice[]
+  followUps          FollowUp[]
+  documents          Document[]
+  messages           MessageLog[]
+  @@unique([tenantId, clientNo])
+  @@index([tenantId, nextReviewDate])
+  @@index([tenantId, createdAt])
+}
+
+model Measurement {
+  id           String   @id @default(cuid())
+  tenantId     String
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id])
+  recordedAt   DateTime @default(now())
+  source       String   @default("MANUAL") // MANUAL | ANALYZER
+  weightKg     Float?
+  heightCm     Float?
+  bodyFatPct   Float?
+  muscleMassKg Float?
+  visceralFat  Float?
+  bodyWaterPct Float?
+  bmrKcal      Float?
+  metabolicAge Float?
+  waistCm      Float?
+  hipCm        Float?
+  chestCm      Float?
+  armCm        Float?
+  thighCm      Float?
+  abdomenCm    Float?
+  notes        String?
+  @@index([clientId, recordedAt])
+}
+
+model Consultation {
+  id             String   @id @default(cuid())
+  tenantId       String
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id])
+  doctorId       String
+  doctor         User     @relation(fields: [doctorId], references: [id])
+  date           DateTime @default(now())
+  kind           String   @default("INITIAL") // INITIAL | REVIEW
+  complaint      String?
+  notes          String?
+  suitability    String?
+  plan           String?
+  nextReviewDate DateTime?
+  @@index([tenantId, date])
+}
+
+model PackageTemplate {
+  id             String                @id @default(cuid())
+  tenantId       String
+  name           String
+  description    String?
+  price          Decimal               @default(0) @db.Decimal(10, 2)
+  validityDays   Int                   @default(90)
+  active         Boolean               @default(true)
+  items          PackageTemplateItem[]
+  clientPackages ClientPackage[]
+}
+
+model PackageTemplateItem {
+  id          String          @id @default(cuid())
+  templateId  String
+  template    PackageTemplate @relation(fields: [templateId], references: [id])
+  treatmentId String
+  treatment   Treatment       @relation(fields: [treatmentId], references: [id])
+  sessions    Int
+}
+
+model ClientPackage {
+  id          String              @id @default(cuid())
+  tenantId    String
+  clientId    String
+  client      Client              @relation(fields: [clientId], references: [id])
+  templateId  String?
+  template    PackageTemplate?    @relation(fields: [templateId], references: [id])
+  invoiceId   String?
+  name        String
+  price       Decimal             @db.Decimal(10, 2) // net of discount, excl. VAT
+  purchasedAt DateTime            @default(now())
+  expiresAt   DateTime
+  status      PackageStatus       @default(ACTIVE)
+  items       ClientPackageItem[]
+  @@index([tenantId, clientId])
+}
+
+// One row per treatment inside a package => each treatment keeps its own independent balance.
+model ClientPackageItem {
+  id              String          @id @default(cuid())
+  clientPackageId String
+  clientPackage   ClientPackage   @relation(fields: [clientPackageId], references: [id])
+  treatmentId     String
+  treatment       Treatment       @relation(fields: [treatmentId], references: [id])
+  totalSessions   Int
+  usedSessions    Int             @default(0)
+  appointments    Appointment[]
+  sessionRecords  SessionRecord[]
+}
+
+model Appointment {
+  id                  String             @id @default(cuid())
+  tenantId            String
+  branchId            String
+  clientId            String
+  client              Client             @relation(fields: [clientId], references: [id])
+  treatmentId         String
+  treatment           Treatment          @relation(fields: [treatmentId], references: [id])
+  therapistId         String
+  therapist           User               @relation(fields: [therapistId], references: [id])
+  machineId           String?
+  machine             Machine?           @relation(fields: [machineId], references: [id])
+  roomId              String
+  room                Room               @relation(fields: [roomId], references: [id])
+  clientPackageItemId String?
+  packageItem         ClientPackageItem? @relation(fields: [clientPackageItemId], references: [id])
+  startAt             DateTime
+  endAt               DateTime // includes treatment buffer (cleaning / prep)
+  status              AppointmentStatus  @default(SCHEDULED)
+  notes               String?
+  createdAt           DateTime           @default(now())
+  session             SessionRecord?
+  @@index([tenantId, startAt])
+  @@index([machineId, startAt])
+  @@index([therapistId, startAt])
+  @@index([roomId, startAt])
+}
+
+model SessionRecord {
+  id                  String            @id @default(cuid())
+  tenantId            String
+  appointmentId       String            @unique
+  appointment         Appointment       @relation(fields: [appointmentId], references: [id])
+  clientPackageItemId String?
+  packageItem         ClientPackageItem? @relation(fields: [clientPackageItemId], references: [id])
+  therapistId         String
+  machineId           String?
+  actualStart         DateTime
+  actualEnd           DateTime
+  value               Decimal           @default(0) @db.Decimal(10, 2) // delivered treatment value (per-session share of package price)
+  notes               String?
+  @@index([tenantId, actualStart])
+}
+
+// Downtime: maintenance, cleaning, leave, room closure. Booking engine treats these as busy.
+model ResourceBlock {
+  id         String       @id @default(cuid())
+  tenantId   String
+  kind       ResourceKind
+  resourceId String
+  startAt    DateTime
+  endAt      DateTime
+  reason     String
+  createdAt  DateTime     @default(now())
+  @@index([tenantId, startAt])
+  @@index([resourceId, startAt])
+}
+
+model Invoice {
+  id           String        @id @default(cuid())
+  tenantId     String
+  number       String
+  kind         InvoiceKind   @default(INVOICE)
+  refInvoiceId String? // credit note -> original invoice
+  clientId     String
+  client       Client        @relation(fields: [clientId], references: [id])
+  subtotal     Decimal       @db.Decimal(10, 2) // gross of line discounts
+  discount     Decimal       @default(0) @db.Decimal(10, 2)
+  taxable      Decimal       @default(0) @db.Decimal(10, 2)
+  vatAmount    Decimal       @db.Decimal(10, 2)
+  total        Decimal       @db.Decimal(10, 2)
+  paid         Decimal       @default(0) @db.Decimal(10, 2)
+  status       InvoiceStatus @default(DRAFT)
+  notes        String?
+  createdById  String?
+  issuedAt     DateTime      @default(now())
+  dueDate      DateTime?
+  items        InvoiceItem[]
+  payments     Payment[]
+  @@unique([tenantId, number])
+  @@index([tenantId, issuedAt])
+}
+
+model InvoiceItem {
+  id                String      @id @default(cuid())
+  invoiceId         String
+  invoice           Invoice     @relation(fields: [invoiceId], references: [id])
+  kind              String      @default("SERVICE") // PACKAGE | SERVICE | PRODUCT | OTHER
+  description       String
+  treatmentId       String?
+  packageTemplateId String?
+  qty               Int         @default(1)
+  unitPrice         Decimal     @db.Decimal(10, 2)
+  discount          Decimal     @default(0) @db.Decimal(10, 2)
+  taxCategory       TaxCategory @default(STANDARD)
+  vatRate           Decimal     @default(5) @db.Decimal(5, 2)
+  vatAmount         Decimal     @db.Decimal(10, 2)
+  lineTotal         Decimal     @db.Decimal(10, 2) // taxable + VAT
+}
+
+model Payment {
+  id          String      @id @default(cuid())
+  tenantId    String
+  receiptNo   String?
+  kind        PaymentKind @default(PAYMENT)
+  invoiceId   String
+  invoice     Invoice     @relation(fields: [invoiceId], references: [id])
+  amount      Decimal     @db.Decimal(10, 2)
+  method      String // CASH | CARD | BANK_TRANSFER | TABBY | TAMARA
+  reference   String?
+  receivedBy  String?
+  paidAt      DateTime    @default(now())
+  @@index([tenantId, paidAt])
+}
+
+model FollowUp {
+  id           String       @id @default(cuid())
+  tenantId     String
+  clientId     String
+  client       Client       @relation(fields: [clientId], references: [id])
+  type         FollowUpType
+  dueDate      DateTime
+  status       TaskStatus   @default(OPEN)
+  assignedToId String?
+  title        String
+  notes        String?
+  outcome      String?
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  @@index([tenantId, status, dueDate])
+}
+
+model Lead {
+  id          String     @id @default(cuid())
+  tenantId    String
+  name        String
+  mobile      String
+  email       String?
+  gender      String?
+  source      String     @default("Walk-in")
+  interest    String?
+  status      LeadStatus @default(NEW)
+  notes       String?
+  nextActionAt DateTime?
+  ownerId     String?
+  clientId    String?
+  createdAt   DateTime   @default(now())
+  @@index([tenantId, status])
+}
+
+model MessageTemplate {
+  id       String  @id @default(cuid())
+  tenantId String
+  name     String
+  channel  String  @default("WHATSAPP")
+  purpose  String // REMINDER | FOLLOW_UP | EXPIRY | MARKETING | GENERAL
+  body     String
+  active   Boolean @default(true)
+}
+
+model MessageLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  clientId   String?
+  client     Client?  @relation(fields: [clientId], references: [id])
+  channel    String
+  to         String
+  templateId String?
+  body       String
+  status     String   @default("SENT")
+  sentById   String?
+  sentAt     DateTime @default(now())
+  @@index([tenantId, sentAt])
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  tenantId   String
+  clientId   String
+  client     Client   @relation(fields: [clientId], references: [id])
+  kind       DocKind
+  title      String
+  fileName   String
+  mime       String
+  size       Int
+  data       Bytes
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+  @@index([clientId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+  @@index([tenantId, createdAt])
+}
