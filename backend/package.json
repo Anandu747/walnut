@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "postinstall": "prisma generate",
-    "vercel-build": "prisma migrate deploy && tsc --noEmit",
+    "vercel-build": "prisma migrate deploy && tsc --noEmit && mkdir -p public",
     "start": "node dist/src/index.js",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
