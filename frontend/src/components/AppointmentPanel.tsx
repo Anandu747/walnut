@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Alert, App, Button, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, Modal, Popconfirm, Row, Select, Space, Spin } from 'antd';
-import { CheckOutlined, ClockCircleOutlined, LoginOutlined, PlayCircleOutlined, ScheduleOutlined, StopOutlined, WhatsAppOutlined } from '@ant-design/icons';
+import { CheckOutlined, ClockCircleOutlined, FileTextOutlined, LoginOutlined, PlayCircleOutlined, ScheduleOutlined, StopOutlined, WhatsAppOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -87,6 +87,9 @@ export default function AppointmentPanel({ id, open, onClose, onChanged }: { id?
   const { setStatus } = useAppointmentActions(changed);
   const live = a && !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(a.status);
   const canBook = hasRole('RECEPTION', 'MANAGER');
+  // Package sessions are already paid for; only pay-per-visit appointments get their own invoice.
+  const billable = a && !a.packageItem && !['CANCELLED', 'NO_SHOW'].includes(a.status) && hasRole('RECEPTION', 'MANAGER', 'ACCOUNTANT');
+  const invoice = a?.invoices?.[0];
 
   return (
     <>
@@ -107,8 +110,12 @@ export default function AppointmentPanel({ id, open, onClose, onChanged }: { id?
                 { label: 'Package', children: a.packageItem ? `${a.packageItem.clientPackage.name} (${a.packageItem.usedSessions}/${a.packageItem.totalSessions} used)` : 'Pay per visit' },
                 ...(a.notes ? [{ label: 'Notes', children: a.notes }] : []),
                 ...(a.session ? [{ label: 'Delivered', children: `${fmtDateTime(a.session.actualStart)} – ${fmtTime(a.session.actualEnd)}${a.session.notes ? ` · ${a.session.notes}` : ''}` }] : []),
+                ...(invoice ? [{ label: 'Invoice', children: <Link href={`/billing/${invoice.id}`}>{invoice.number}</Link> }] : []),
               ]}
             />
+            {billable && !invoice && (
+              <Button block type={live ? 'default' : 'primary'} icon={<FileTextOutlined />} style={{ marginTop: 16 }} href={`/billing/new?clientId=${a.client.id}&appointmentId=${a.id}`}>Generate invoice</Button>
+            )}
             {live && (
               <div style={{ display: 'grid', gap: 8, marginTop: 20 }}>
                 {a.status === 'SCHEDULED' && canBook && <Button icon={<CheckOutlined />} onClick={() => setStatus(a.id, 'CONFIRMED')}>Mark confirmed</Button>}

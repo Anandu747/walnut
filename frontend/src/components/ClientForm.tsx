@@ -42,7 +42,9 @@ export default function ClientForm({ form, onFinish, initialValues }: { form: Fo
       <Section title="Basic information">
         <Row gutter={16}>
           <Col xs={8} md={3}><Form.Item name="title" label="Title"><Select allowClear placeholder="Title" options={['Ms.', 'Mrs.', 'Mr.', 'Dr.'].map((value) => ({ value }))} /></Form.Item></Col>
-          <Col xs={16} md={9}><Form.Item name="name" label="Full name" rules={[{ required: true, message: 'Enter the client’s full name' }]}><Input placeholder="First and last name" /></Form.Item></Col>
+          <Col xs={16} md={7}><Form.Item name="firstName" label="First name" rules={[{ required: true, whitespace: true, message: 'Enter first name' }]}><Input placeholder="Enter first name" /></Form.Item></Col>
+          <Col xs={12} md={7}><Form.Item name="middleName" label="Middle name"><Input placeholder="Enter middle name" /></Form.Item></Col>
+          <Col xs={12} md={7}><Form.Item name="lastName" label="Last name" rules={[{ required: true, whitespace: true, message: 'Enter last name' }]}><Input placeholder="Enter last name" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item name="mobile" label="Mobile" rules={[{ required: true, message: 'Mobile is required' }, { pattern: /^[+0-9 ]{7,16}$/, message: 'Digits only, e.g. 0501234567' }]}><Input placeholder="05X XXX XXXX" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item name="altPhone" label="Additional phone"><Input placeholder="+971" /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item name="email" label="Email" rules={[{ type: 'email', message: 'Not a valid email' }]}><Input placeholder="name@example.com" /></Form.Item></Col>

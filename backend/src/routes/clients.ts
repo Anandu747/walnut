@@ -18,13 +18,16 @@ async function ownClient(tenantId: string, id: string) {
 }
 
 const clientBody = z.object({
-  title: opt, name: z.string().trim().min(1), mobile: z.string().trim().min(5), altPhone: opt, email: z.string().email().optional().nullable().or(z.literal('')),
+  title: opt, firstName: z.string().trim().min(1), middleName: opt, lastName: z.string().trim().min(1), mobile: z.string().trim().min(5), altPhone: opt, email: z.string().email().optional().nullable().or(z.literal('')),
   dob: z.coerce.date().optional().nullable(), gender: opt, nationality: opt, emiratesId: opt, address: opt, occupation: opt, source: opt, referredBy: opt,
   emergencyName: opt, emergencyRelation: opt, emergencyPhone: opt,
   medicalNotes: opt, conditions: opt, allergies: opt, medications: opt, contraindications: opt, goal: opt, targetWeightKg: z.number().positive().optional().nullable(),
   consentSigned: z.boolean().optional(), photoConsent: z.boolean().optional(), whatsappOptIn: z.boolean().optional(), marketingOptIn: z.boolean().optional(),
   vip: z.boolean().optional(), reviewIntervalDays: z.number().int().min(1).max(365).optional(),
 });
+
+// Full display name is always derived from the parts so search, invoices and the calendar stay consistent.
+const fullName = (p: { firstName: string; middleName?: string | null; lastName: string }) => [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ');
 
 r.post('/clients', requireRole('RECEPTION', 'MANAGER', 'DOCTOR'), async (req, res) => {
   const b = clientBody.parse(req.body);
@@ -33,7 +36,7 @@ r.post('/clients', requireRole('RECEPTION', 'MANAGER', 'DOCTOR'), async (req, re
   const c = await prisma.$transaction(async (tx) => {
     const { n } = await nextSeq(tx, req.auth.tenantId, 'clientSeq');
     return tx.client.create({
-      data: { ...b, email: b.email || null, tenantId: req.auth.tenantId, clientNo: `WLN-${String(n).padStart(5, '0')}`, consentSignedAt: b.consentSigned ? new Date() : null },
+      data: { ...b, name: fullName(b), email: b.email || null, tenantId: req.auth.tenantId, clientNo: `WLN-${String(n).padStart(5, '0')}`, consentSignedAt: b.consentSigned ? new Date() : null },
     });
   });
   if (req.body.leadId) await prisma.lead.updateMany({ where: { id: String(req.body.leadId), tenantId: req.auth.tenantId }, data: { status: 'CONVERTED', clientId: c.id } });
@@ -46,7 +49,12 @@ r.patch('/clients/:id', requireRole('RECEPTION', 'MANAGER', 'DOCTOR'), async (re
   const b = clientBody.partial().extend({ active: z.boolean().optional() }).parse(req.body);
   const c = await prisma.client.update({
     where: { id: before.id },
-    data: { ...b, ...(b.email !== undefined && { email: b.email || null }), ...(b.consentSigned && !before.consentSigned && { consentSignedAt: new Date() }) },
+    data: {
+      ...b, ...(b.email !== undefined && { email: b.email || null }),
+      ...((b.firstName !== undefined || b.middleName !== undefined || b.lastName !== undefined) && {
+        name: fullName({ firstName: b.firstName ?? before.firstName, middleName: b.middleName !== undefined ? b.middleName : before.middleName, lastName: b.lastName ?? before.lastName }),
+      }),
+      ...(b.consentSigned && !before.consentSigned && { consentSignedAt: new Date() }) },
   });
   await audit(req, 'client.update', 'Client', c.id, { fields: Object.keys(b) });
   res.json(c);
@@ -61,7 +69,7 @@ r.get('/clients', async (req, res) => {
   const now = new Date();
   const where: Prisma.ClientWhereInput = {
     tenantId: req.auth.tenantId,
-    ...(q.q && { OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { mobile: { contains: q.q } }, { clientNo: { contains: q.q, mode: 'insensitive' } }, { email: { contains: q.q, mode: 'insensitive' } }, { emiratesId: { contains: q.q } }] }),
+    ...(q.q && { OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { lastName: { contains: q.q, mode: 'insensitive' } }, { mobile: { contains: q.q } }, { clientNo: { contains: q.q, mode: 'insensitive' } }, { email: { contains: q.q, mode: 'insensitive' } }, { emiratesId: { contains: q.q } }] }),
     ...(q.gender && { gender: q.gender }), ...(q.source && { source: q.source }),
     ...(q.filter === 'active-package' && { packages: { some: { status: 'ACTIVE', expiresAt: { gt: now } } } }),
     ...(q.filter === 'review-due' && { nextReviewDate: { lte: new Date(now.getTime() + 3 * DAY) } }),

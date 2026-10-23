@@ -76,7 +76,10 @@ r.get('/scheduler', async (req, res) => {
 });
 
 r.get('/appointments/:id', async (req, res) => {
-  const a = await prisma.appointment.findFirst({ where: { id: String(req.params.id), tenantId: req.auth.tenantId }, include: { ...include, session: true } });
+  const a = await prisma.appointment.findFirst({ where: { id: String(req.params.id), tenantId: req.auth.tenantId }, include: {
+    ...include, session: true,
+    invoices: { where: { kind: 'INVOICE', status: { not: 'VOID' } }, select: { id: true, number: true, status: true, total: true } },
+  } });
   if (!a) throw new HttpError(404, 'Appointment not found');
   res.json(a);
 });

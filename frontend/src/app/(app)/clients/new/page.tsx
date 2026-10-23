@@ -7,6 +7,14 @@ import { api, ApiError } from '@/lib/api';
 import { PageHeader } from '@/components/ui';
 import ClientForm, { fromForm } from '@/components/ClientForm';
 
+// A lead only has one name field; prefill first name + last name from it (surname = last word, keeping 'Al …' together).
+function splitName(full: string | null) {
+  const w = (full ?? '').trim().split(/\s+/).filter(Boolean);
+  if (w.length < 2) return { firstName: w[0] };
+  const cut = w.length > 2 && ['Al', 'El', 'Bin', 'Bint', 'Abu'].includes(w[w.length - 2]) ? w.length - 2 : w.length - 1;
+  return { firstName: w[0], middleName: w.slice(1, cut).join(' ') || undefined, lastName: w.slice(cut).join(' ') };
+}
+
 function NewClientInner() {
   const router = useRouter();
   const params = useSearchParams();
@@ -36,7 +44,7 @@ function NewClientInner() {
         <Alert type="warning" showIcon style={{ marginBottom: 16 }} title="Possible duplicate" description={dup.message}
           action={<Link href={`/clients/${dup.clientId}`}><Button size="small">Open existing client</Button></Link>} />
       )}
-      <ClientForm form={form} onFinish={submit} initialValues={{ name: params.get('name') ?? undefined, mobile: params.get('mobile') ?? undefined, gender: params.get('gender') ?? undefined, source: params.get('source') ?? undefined }} />
+      <ClientForm form={form} onFinish={submit} initialValues={{ ...splitName(params.get('name')), mobile: params.get('mobile') ?? undefined, gender: params.get('gender') ?? undefined, source: params.get('source') ?? undefined }} />
       <div style={{ position: 'sticky', bottom: 0, background: '#fff', borderTop: '1px solid #ECEAE4', padding: '12px 16px', margin: '0 -24px -24px', display: 'flex', justifyContent: 'flex-end', zIndex: 5 }}>
         <Space>
           <Button onClick={() => router.back()}>Discard</Button>

@@ -3,6 +3,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Alert, App, Button, Card, Col, Divider, Empty, Input, InputNumber, Row, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
 import { DeleteOutlined, GiftOutlined, PlusOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { money, PAY_METHODS } from '@/lib/format';
 import { PageHeader } from '@/components/ui';
@@ -26,12 +27,21 @@ function NewInvoiceInner() {
   const [pay, setPay] = useState<{ amount?: number; method: string; reference?: string }>({ method: 'CARD' });
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const appointmentId = params.get('appointmentId') ?? undefined;
+  const [appt, setAppt] = useState<any>(null);
 
   useEffect(() => {
     Promise.all([api<any[]>('/package-templates'), api<any[]>('/treatments'), api<any>('/settings')]).then(([p, t, s]) => {
       setTemplates(p.filter((x) => x.active)); setTreatments(t.filter((x) => x.active)); setVatRate(Number(s.vatRate));
+      // Raised from an appointment: bill its treatment as a single pay-per-visit service.
+      if (appointmentId) api<any>(`/appointments/${appointmentId}`).then((a) => {
+        setAppt(a); setClientId(a.client.id);
+        setNotes(`Appointment ${dayjs(a.startAt).format('DD MMM YYYY, HH:mm')} · ${a.therapist.name}`);
+        const tr = t.find((x) => x.id === a.treatment.id);
+        if (tr) setLines([{ key: seq++, kind: 'SERVICE', treatmentId: tr.id, description: tr.name, detail: `${tr.durationMin} min · ${dayjs(a.startAt).format('DD MMM')}`, qty: 1, unitPrice: Number(tr.price), discount: 0, taxCategory: tr.taxCategory }]);
+      }).catch((e) => message.error((e as Error).message));
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setClient(null); if (clientId) api(`/clients/${clientId}`).then(setClient).catch(() => {}); }, [clientId]);
 
   const addPackage = (t: any) => setLines((l) => [...l, { key: seq++, kind: 'PACKAGE', packageTemplateId: t.id, description: t.name, detail: t.items.map((i: any) => `${i.sessions} × ${i.treatment.name}`).join(' + ') + ` · valid ${t.validityDays} days`, qty: 1, unitPrice: Number(t.price), discount: 0, taxCategory: 'STANDARD' }]);
@@ -58,7 +68,7 @@ function NewInvoiceInner() {
     try {
       const inv = await api<any>('/invoices', {
         method: 'POST', body: {
-          clientId, notes: notes || undefined,
+          clientId, appointmentId: appt?.id, notes: notes || undefined,
           items: lines.map((l) => ({ kind: l.kind, packageTemplateId: l.packageTemplateId, treatmentId: l.treatmentId, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discount: l.discount, taxCategory: l.taxCategory })),
           payment: payAmount > 0 ? { amount: payAmount, method: pay.method, reference: pay.reference || undefined } : undefined,
         },
@@ -76,7 +86,8 @@ function NewInvoiceInner() {
       <Row gutter={16}>
         <Col xs={24} xl={16}>
           <Card size="small" title="Client" style={{ marginBottom: 16 }}>
-            <ClientSelect value={clientId} onChange={(v) => setClientId(v)} style={{ width: '100%' }} />
+            {appt && <Alert type="info" showIcon style={{ marginBottom: 10 }} title={`Billing appointment: ${appt.treatment.name}`} description={`${dayjs(appt.startAt).format('ddd DD MMM YYYY, HH:mm')} · ${appt.therapist.name}${appt.machine ? ` · ${appt.machine.code}` : ''} · ${appt.room.name}`} />}
+            <ClientSelect value={clientId} onChange={(v) => setClientId(v)} disabled={!!appt} style={{ width: '100%' }} />
             {client && (
               <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <Tag>{client.clientNo}</Tag><Tag>{client.mobile}</Tag>

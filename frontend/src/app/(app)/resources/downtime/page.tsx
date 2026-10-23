@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { App, Button, Card, Popconfirm, Segmented, Table, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -14,7 +14,8 @@ export default function DowntimePage() {
   const [when, setWhen] = useState<'upcoming' | 'past'>('upcoming');
   const [add, setAdd] = useState<any>(null);
   const [names, setNames] = useState<Record<string, string>>({});
-  const q = when === 'upcoming' ? `from=${encodeURIComponent(dayjs().toISOString())}` : `to=${encodeURIComponent(dayjs().toISOString())}`;
+  // Freeze "now" per tab switch — a fresh timestamp every render changes the path and refetches forever.
+  const q = useMemo(() => { const now = encodeURIComponent(dayjs().toISOString()); return when === 'upcoming' ? `from=${now}` : `to=${now}`; }, [when]);
   const { data = [], loading, reload } = useApi<any[]>(`/blocks?${q}`, []);
   useEffect(() => {
     Promise.all([api<any[]>('/machines'), api<any[]>('/staff'), api<any[]>('/rooms')]).then(([m, s, r]) =>

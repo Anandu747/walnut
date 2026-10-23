@@ -24,6 +24,12 @@ const DAY = 86_400_000, MIN = 60_000;
 const NOW = new Date();
 const TODAY = new Date(NOW); TODAY.setHours(0, 0, 0, 0);
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+// 'Fatima Al Mansoori' -> first 'Fatima', last 'Al Mansoori' (Arabic family-name prefixes stay with the surname).
+const splitName = (full: string) => {
+  const w = full.split(' ');
+  const cut = w.length > 2 && ['Al', 'El', 'Bin', 'Bint', 'Abu'].includes(w[w.length - 2]) ? w.length - 2 : w.length - 1;
+  return { firstName: w[0], middleName: w.slice(1, cut).join(' ') || null, lastName: w.slice(cut).join(' ') };
+};
 const at = (d: Date, minute: number) => { const x = new Date(d); x.setHours(0, minute, 0, 0); return x; };
 const OPEN = 10 * 60, CLOSE = 21 * 60, OPEN_DB = 9 * 60;
 
@@ -233,7 +239,7 @@ async function main() {
     const weight = r2(male ? int(82, 112) + rnd() : int(62, 96) + rnd());
     const c = await prisma.client.create({
       data: {
-        tenantId: t, clientNo: `WLN-${String(seq).padStart(5, '0')}`, title: male ? 'Mr.' : pick(['Ms.', 'Mrs.']), name: p.name, gender: p.gender,
+        tenantId: t, clientNo: `WLN-${String(seq).padStart(5, '0')}`, title: male ? 'Mr.' : pick(['Ms.', 'Mrs.']), name: p.name, ...splitName(p.name), gender: p.gender,
         mobile: `05${pick(['0', '2', '4', '5', '6', '8'])}${int(1000000, 9999999)}`, email: `${first.toLowerCase()}.${int(10, 99)}@${pick(['gmail.com', 'outlook.com', 'yahoo.com', 'icloud.com'])}`,
         dob: new Date(int(1972, 2001), int(0, 11), int(1, 28)), nationality: p.name.includes(' Al ') ? 'UAE' : NATIONALITY[first] ?? pick(['UAE', 'Lebanon', 'Egypt', 'UK', 'Jordan', 'Germany', 'Italy', 'India']),
         emiratesId: `784-${int(1972, 2001)}-${int(1000000, 9999999)}-${int(1, 9)}`, address: `${pick(['Jumeirah', 'Al Barsha', 'Dubai Marina', 'JLT', 'Downtown', 'Mirdif', 'Al Safa', 'Umm Suqeim', 'Business Bay', 'Arabian Ranches'])}, Dubai`,

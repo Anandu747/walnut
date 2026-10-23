@@ -4,8 +4,8 @@ import { Select } from 'antd';
 import { api } from '@/lib/api';
 
 /** Server-side client search (name, mobile, client ID). Keeps the selected client visible even when not in results. */
-export default function ClientSelect({ value, onChange, placeholder = 'Search client by name, mobile or ID', initialLabel, style }: {
-  value?: string; onChange?: (v: string, c?: any) => void; placeholder?: string; initialLabel?: string; style?: React.CSSProperties;
+export default function ClientSelect({ value, onChange, placeholder = 'Search client by name, mobile or ID', initialLabel, style, disabled }: {
+  value?: string; onChange?: (v: string, c?: any) => void; placeholder?: string; initialLabel?: string; style?: React.CSSProperties; disabled?: boolean;
 }) {
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<any[]>([]);
@@ -27,7 +27,7 @@ export default function ClientSelect({ value, onChange, placeholder = 'Search cl
   const all = [...(selected && !rows.some((r) => r.id === selected.id) ? [selected] : []), ...rows];
   return (
     <Select
-      showSearch={{ filterOption: false, onSearch: setQ }} value={value} loading={loading} placeholder={placeholder} style={style}
+      showSearch={{ filterOption: false, onSearch: setQ }} value={value} loading={loading} placeholder={placeholder} style={style} disabled={disabled}
       notFoundContent={loading ? 'Searching…' : 'No client found'}
       onChange={(v) => { const c = all.find((r) => r.id === v); setSelected(c); onChange?.(v, c); }}
       options={all.map((c) => ({ value: c.id, label: `${c.name} · ${c.clientNo} · ${c.mobile}` }))}

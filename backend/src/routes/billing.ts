@@ -13,7 +13,7 @@ const METHODS = ['CASH', 'CARD', 'BANK_TRANSFER', 'TABBY', 'TAMARA', 'CHEQUE'] a
 
 r.post('/invoices', requireRole(...BILLERS), async (req, res) => {
   const b = z.object({
-    clientId: z.string(), notes: z.string().optional(), dueDate: z.coerce.date().optional(),
+    clientId: z.string(), appointmentId: z.string().optional(), notes: z.string().optional(), dueDate: z.coerce.date().optional(),
     items: z.array(z.object({
       kind: z.enum(['PACKAGE', 'SERVICE', 'PRODUCT', 'OTHER']), packageTemplateId: z.string().optional(), treatmentId: z.string().optional(),
       description: z.string().optional(), qty: z.number().int().min(1).default(1), unitPrice: z.number().min(0).optional(),
@@ -22,7 +22,7 @@ r.post('/invoices', requireRole(...BILLERS), async (req, res) => {
     payment: z.object({ amount: z.number().positive(), method: z.enum(METHODS), reference: z.string().optional() }).optional(),
   }).parse(req.body);
   const inv = await createInvoice(req.auth.tenantId, req.auth.userId, b);
-  await audit(req, 'invoice.create', 'Invoice', inv.id, { clientId: b.clientId, number: inv.number, total: Number(inv.total) });
+  await audit(req, 'invoice.create', 'Invoice', inv.id, { clientId: b.clientId, appointmentId: b.appointmentId, number: inv.number, total: Number(inv.total) });
   res.status(201).json(inv);
 });
 

@@ -19,7 +19,7 @@ export type LineInput = {
 };
 
 export type InvoiceInput = {
-  clientId: string; items: LineInput[]; notes?: string; dueDate?: Date;
+  clientId: string; items: LineInput[]; notes?: string; dueDate?: Date; appointmentId?: string;
   payment?: { amount: number; method: string; reference?: string };
 };
 
@@ -31,6 +31,14 @@ export async function createInvoice(tenantId: string, userId: string, input: Inv
   return prisma.$transaction(async (tx) => {
     const client = await tx.client.findFirst({ where: { id: input.clientId, tenantId } });
     if (!client) throw new HttpError(404, 'Client not found');
+    if (input.appointmentId) {
+      const appt = await tx.appointment.findFirst({ where: { id: input.appointmentId, tenantId, clientId: client.id } });
+      if (!appt) throw new HttpError(404, 'Appointment not found for this client');
+      if (appt.clientPackageItemId) throw new HttpError(409, 'This appointment is covered by a package — nothing to bill');
+      if (['CANCELLED', 'NO_SHOW'].includes(appt.status)) throw new HttpError(409, 'Cancelled / no-show appointments cannot be invoiced');
+      const existing = await tx.invoice.findFirst({ where: { appointmentId: appt.id, tenantId, kind: 'INVOICE', status: { not: 'VOID' } } });
+      if (existing) throw new HttpError(409, `Appointment already invoiced (${existing.number})`);
+    }
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     const vat = Number(tenant.vatRate);
 
@@ -70,7 +78,7 @@ export async function createInvoice(tenantId: string, userId: string, input: Inv
     const { n } = await nextSeq(tx, tenantId, 'invoiceSeq');
     const invoice = await tx.invoice.create({
       data: {
-        tenantId, clientId: client.id, number: `${tenant.invoicePrefix}-${new Date().getFullYear()}-${String(n).padStart(5, '0')}`,
+        tenantId, clientId: client.id, appointmentId: input.appointmentId, number: `${tenant.invoicePrefix}-${new Date().getFullYear()}-${String(n).padStart(5, '0')}`,
         subtotal, discount, taxable: r2(subtotal - discount), vatAmount, total, paid, notes: input.notes, dueDate: input.dueDate,
         createdById: userId, status: paid >= total ? 'PAID' : paid > 0 ? 'PARTIALLY_PAID' : 'ISSUED',
         items: { create: lines.map(({ _template, ...l }) => l) },

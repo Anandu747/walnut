@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"] // rhel = Vercel's Linux runtime
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED") // migrations bypass the connection pooler (Neon)
 }
 
 // Every row carries tenantId (one tenant = one centre/clinic = one SaaS customer).
@@ -127,6 +129,7 @@ model Branch {
   name     String
   rooms    Room[]
   machines Machine[]
+
   @@index([tenantId])
 }
 
@@ -139,6 +142,7 @@ model Room {
   active       Boolean       @default(true)
   machines     Machine[]
   appointments Appointment[]
+
   @@unique([tenantId, branchId, name])
 }
 
@@ -148,6 +152,7 @@ model MachineType {
   name       String
   machines   Machine[]
   treatments Treatment[]
+
   @@unique([tenantId, name])
 }
 
@@ -169,6 +174,7 @@ model Machine {
   notes         String?
   status        MachineStatus @default(OPERATIONAL)
   appointments  Appointment[]
+
   @@unique([tenantId, code])
 }
 
@@ -190,6 +196,7 @@ model User {
   skills        TherapistSkill[]
   appointments  Appointment[]
   consultations Consultation[]
+
   @@unique([tenantId, email])
 }
 
@@ -212,6 +219,7 @@ model Treatment {
   templateItems PackageTemplateItem[]
   packageItems  ClientPackageItem[]
   appointments  Appointment[]
+
   @@unique([tenantId, name])
 }
 
@@ -220,6 +228,7 @@ model TherapistSkill {
   treatmentId String
   user        User      @relation(fields: [userId], references: [id])
   treatment   Treatment @relation(fields: [treatmentId], references: [id])
+
   @@id([userId, treatmentId])
 }
 
@@ -228,7 +237,10 @@ model Client {
   tenantId           String
   clientNo           String
   title              String?
-  name               String
+  firstName          String          @default("")
+  middleName         String?
+  lastName           String          @default("")
+  name               String // full display name, always derived from first/middle/last
   mobile             String
   altPhone           String?
   email              String?
@@ -268,6 +280,7 @@ model Client {
   followUps          FollowUp[]
   documents          Document[]
   messages           MessageLog[]
+
   @@unique([tenantId, clientNo])
   @@index([tenantId, nextReviewDate])
   @@index([tenantId, createdAt])
@@ -295,23 +308,25 @@ model Measurement {
   thighCm      Float?
   abdomenCm    Float?
   notes        String?
+
   @@index([clientId, recordedAt])
 }
 
 model Consultation {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   tenantId       String
   clientId       String
-  client         Client   @relation(fields: [clientId], references: [id])
+  client         Client    @relation(fields: [clientId], references: [id])
   doctorId       String
-  doctor         User     @relation(fields: [doctorId], references: [id])
-  date           DateTime @default(now())
-  kind           String   @default("INITIAL") // INITIAL | REVIEW
+  doctor         User      @relation(fields: [doctorId], references: [id])
+  date           DateTime  @default(now())
+  kind           String    @default("INITIAL") // INITIAL | REVIEW
   complaint      String?
   notes          String?
   suitability    String?
   plan           String?
   nextReviewDate DateTime?
+
   @@index([tenantId, date])
 }
 
@@ -350,6 +365,7 @@ model ClientPackage {
   expiresAt   DateTime
   status      PackageStatus       @default(ACTIVE)
   items       ClientPackageItem[]
+
   @@index([tenantId, clientId])
 }
 
@@ -388,6 +404,8 @@ model Appointment {
   notes               String?
   createdAt           DateTime           @default(now())
   session             SessionRecord?
+  invoices            Invoice[]
+
   @@index([tenantId, startAt])
   @@index([machineId, startAt])
   @@index([therapistId, startAt])
@@ -395,18 +413,19 @@ model Appointment {
 }
 
 model SessionRecord {
-  id                  String            @id @default(cuid())
+  id                  String             @id @default(cuid())
   tenantId            String
-  appointmentId       String            @unique
-  appointment         Appointment       @relation(fields: [appointmentId], references: [id])
+  appointmentId       String             @unique
+  appointment         Appointment        @relation(fields: [appointmentId], references: [id])
   clientPackageItemId String?
   packageItem         ClientPackageItem? @relation(fields: [clientPackageItemId], references: [id])
   therapistId         String
   machineId           String?
   actualStart         DateTime
   actualEnd           DateTime
-  value               Decimal           @default(0) @db.Decimal(10, 2) // delivered treatment value (per-session share of package price)
+  value               Decimal            @default(0) @db.Decimal(10, 2) // delivered treatment value (per-session share of package price)
   notes               String?
+
   @@index([tenantId, actualStart])
 }
 
@@ -420,33 +439,38 @@ model ResourceBlock {
   endAt      DateTime
   reason     String
   createdAt  DateTime     @default(now())
+
   @@index([tenantId, startAt])
   @@index([resourceId, startAt])
 }
 
 model Invoice {
-  id           String        @id @default(cuid())
-  tenantId     String
-  number       String
-  kind         InvoiceKind   @default(INVOICE)
-  refInvoiceId String? // credit note -> original invoice
-  clientId     String
-  client       Client        @relation(fields: [clientId], references: [id])
-  subtotal     Decimal       @db.Decimal(10, 2) // gross of line discounts
-  discount     Decimal       @default(0) @db.Decimal(10, 2)
-  taxable      Decimal       @default(0) @db.Decimal(10, 2)
-  vatAmount    Decimal       @db.Decimal(10, 2)
-  total        Decimal       @db.Decimal(10, 2)
-  paid         Decimal       @default(0) @db.Decimal(10, 2)
-  status       InvoiceStatus @default(DRAFT)
-  notes        String?
-  createdById  String?
-  issuedAt     DateTime      @default(now())
-  dueDate      DateTime?
-  items        InvoiceItem[]
-  payments     Payment[]
+  id            String        @id @default(cuid())
+  tenantId      String
+  number        String
+  kind          InvoiceKind   @default(INVOICE)
+  refInvoiceId  String? // credit note -> original invoice
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  appointmentId String? // pay-per-visit invoice raised from an appointment
+  appointment   Appointment?  @relation(fields: [appointmentId], references: [id])
+  subtotal      Decimal       @db.Decimal(10, 2) // gross of line discounts
+  discount      Decimal       @default(0) @db.Decimal(10, 2)
+  taxable       Decimal       @default(0) @db.Decimal(10, 2)
+  vatAmount     Decimal       @db.Decimal(10, 2)
+  total         Decimal       @db.Decimal(10, 2)
+  paid          Decimal       @default(0) @db.Decimal(10, 2)
+  status        InvoiceStatus @default(DRAFT)
+  notes         String?
+  createdById   String?
+  issuedAt      DateTime      @default(now())
+  dueDate       DateTime?
+  items         InvoiceItem[]
+  payments      Payment[]
+
   @@unique([tenantId, number])
   @@index([tenantId, issuedAt])
+  @@index([appointmentId])
 }
 
 model InvoiceItem {
@@ -467,17 +491,18 @@ model InvoiceItem {
 }
 
 model Payment {
-  id          String      @id @default(cuid())
-  tenantId    String
-  receiptNo   String?
-  kind        PaymentKind @default(PAYMENT)
-  invoiceId   String
-  invoice     Invoice     @relation(fields: [invoiceId], references: [id])
-  amount      Decimal     @db.Decimal(10, 2)
-  method      String // CASH | CARD | BANK_TRANSFER | TABBY | TAMARA
-  reference   String?
-  receivedBy  String?
-  paidAt      DateTime    @default(now())
+  id         String      @id @default(cuid())
+  tenantId   String
+  receiptNo  String?
+  kind       PaymentKind @default(PAYMENT)
+  invoiceId  String
+  invoice    Invoice     @relation(fields: [invoiceId], references: [id])
+  amount     Decimal     @db.Decimal(10, 2)
+  method     String // CASH | CARD | BANK_TRANSFER | TABBY | TAMARA
+  reference  String?
+  receivedBy String?
+  paidAt     DateTime    @default(now())
+
   @@index([tenantId, paidAt])
 }
 
@@ -495,24 +520,26 @@ model FollowUp {
   outcome      String?
   completedAt  DateTime?
   createdAt    DateTime     @default(now())
+
   @@index([tenantId, status, dueDate])
 }
 
 model Lead {
-  id          String     @id @default(cuid())
-  tenantId    String
-  name        String
-  mobile      String
-  email       String?
-  gender      String?
-  source      String     @default("Walk-in")
-  interest    String?
-  status      LeadStatus @default(NEW)
-  notes       String?
+  id           String     @id @default(cuid())
+  tenantId     String
+  name         String
+  mobile       String
+  email        String?
+  gender       String?
+  source       String     @default("Walk-in")
+  interest     String?
+  status       LeadStatus @default(NEW)
+  notes        String?
   nextActionAt DateTime?
-  ownerId     String?
-  clientId    String?
-  createdAt   DateTime   @default(now())
+  ownerId      String?
+  clientId     String?
+  createdAt    DateTime   @default(now())
+
   @@index([tenantId, status])
 }
 
@@ -538,6 +565,7 @@ model MessageLog {
   status     String   @default("SENT")
   sentById   String?
   sentAt     DateTime @default(now())
+
   @@index([tenantId, sentAt])
 }
 
@@ -554,6 +582,7 @@ model Document {
   data       Bytes
   uploadedBy String?
   createdAt  DateTime @default(now())
+
   @@index([clientId])
 }
 
@@ -566,5 +595,6 @@ model AuditLog {
   entityId  String?
   details   Json?
   createdAt DateTime @default(now())
+
   @@index([tenantId, createdAt])
 }
