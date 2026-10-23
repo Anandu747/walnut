@@ -4,9 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL_UNPOOLED") // migrations bypass the connection pooler (Neon)
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // Every row carries tenantId (one tenant = one centre/clinic = one SaaS customer).
