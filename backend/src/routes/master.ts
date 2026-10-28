@@ -37,19 +37,51 @@ const treatmentBody = z.object({
   name: z.string().min(1), code: opt, category: z.string().min(1).default('Body Contouring'), description: opt, color: opt, machineTypeId: z.string().optional().nullable(),
   durationMin: z.number().int().positive(), bufferMin: z.number().int().min(0).default(10), price: z.number().min(0).default(0),
   taxCategory: z.enum(['STANDARD', 'ZERO', 'EXEMPT']).default('STANDARD'), active: z.boolean().optional(),
+  skills: z.array(z.string()).optional(), // qualified staff (user ids)
 });
+async function checkStaff(tenantId: string, ids?: string[]) {
+  if (ids?.length && (await prisma.user.count({ where: { tenantId, id: { in: ids } } })) !== new Set(ids).size) throw new HttpError(400, 'Unknown staff member');
+}
 r.post('/treatments', requireRole('MANAGER'), async (req, res) => {
-  const b = treatmentBody.parse(req.body);
-  const t = await prisma.treatment.create({ data: { ...b, tenantId: req.auth.tenantId } });
+  const { skills, ...b } = treatmentBody.parse(req.body);
+  await checkStaff(req.auth.tenantId, skills);
+  if (await prisma.treatment.findFirst({ where: { ...tenant(req), name: b.name } })) throw new HttpError(409, 'A treatment with this name already exists');
+  const t = await prisma.treatment.create({ data: { ...b, tenantId: req.auth.tenantId, skills: skills && { create: [...new Set(skills)].map((userId) => ({ userId })) } } });
   await audit(req, 'treatment.create', 'Treatment', t.id);
   res.status(201).json(t);
 });
 r.patch('/treatments/:id', requireRole('MANAGER'), async (req, res) => {
-  const b = treatmentBody.partial().parse(req.body);
-  const out = await prisma.treatment.updateMany({ where: { id: String(req.params.id), ...tenant(req) }, data: b });
-  if (!out.count) throw new HttpError(404, 'Treatment not found');
-  await audit(req, 'treatment.update', 'Treatment', String(req.params.id), b);
+  const { skills, ...b } = treatmentBody.partial().parse(req.body);
+  const t = await prisma.treatment.findFirst({ where: { id: String(req.params.id), ...tenant(req) } });
+  if (!t) throw new HttpError(404, 'Treatment not found');
+  await checkStaff(req.auth.tenantId, skills);
+  await prisma.$transaction(async (tx) => {
+    await tx.treatment.update({ where: { id: t.id }, data: b });
+    if (skills) {
+      await tx.therapistSkill.deleteMany({ where: { treatmentId: t.id } });
+      await tx.therapistSkill.createMany({ data: [...new Set(skills)].map((userId) => ({ userId, treatmentId: t.id })) });
+    }
+  });
+  await audit(req, 'treatment.update', 'Treatment', t.id, { ...b, skills });
   res.json({ ok: true });
+});
+
+// Only a treatment that was never booked, sold or packaged can be deleted; otherwise deactivate it to keep history intact.
+r.delete('/treatments/:id', requireRole('MANAGER'), async (req, res) => {
+  const t = await prisma.treatment.findFirst({ where: { id: String(req.params.id), ...tenant(req) }, include: { _count: { select: { appointments: true, packageItems: true, templateItems: true } } } });
+  if (!t) throw new HttpError(404, 'Treatment not found');
+  if (t._count.appointments || t._count.packageItems || t._count.templateItems) throw new HttpError(409, 'This treatment has bookings or packages — deactivate it instead');
+  await prisma.$transaction([prisma.therapistSkill.deleteMany({ where: { treatmentId: t.id } }), prisma.treatment.delete({ where: { id: t.id } })]);
+  await audit(req, 'treatment.delete', 'Treatment', t.id, { name: t.name });
+  res.json({ ok: true });
+});
+
+r.post('/machine-types', requireRole('MANAGER'), async (req, res) => {
+  const b = z.object({ name: z.string().trim().min(1) }).parse(req.body);
+  if (await prisma.machineType.findFirst({ where: { ...tenant(req), name: b.name } })) throw new HttpError(409, 'Machine type already exists');
+  const m = await prisma.machineType.create({ data: { ...b, tenantId: req.auth.tenantId } });
+  await audit(req, 'machine-type.create', 'MachineType', m.id);
+  res.status(201).json(m);
 });
 
 // ---- Machines & rooms ----

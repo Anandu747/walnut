@@ -2,6 +2,7 @@
 import { Alert, Card, Checkbox, Col, DatePicker, Form, FormInstance, Input, InputNumber, Row, Select, Switch } from 'antd';
 import dayjs from 'dayjs';
 import { SOURCES } from '@/lib/format';
+import OfferSelect from './OfferSelect';
 
 // Device safety screening for non-surgical body contouring (EMS, RF, cryolipolysis, HIFU).
 export const SCREENING = [
@@ -37,6 +38,7 @@ export default function ClientForm({ form, onFinish, initialValues }: { form: Fo
           <Col xs={12} md={4}><Form.Item name="vip" valuePropName="checked" label="VIP client"><Switch /></Form.Item></Col>
           <Col xs={12} md={6}><Form.Item name="source" label="How did they hear about us?"><Select allowClear placeholder="Select source" options={SOURCES.map((value) => ({ value }))} /></Form.Item></Col>
           <Col xs={24} md={6}><Form.Item name="referredBy" label="Referred by"><Input placeholder="Client or partner name" /></Form.Item></Col>
+          <Col xs={24} md={8}><Form.Item name="offer" label="Marketing offer selected"><OfferSelect /></Form.Item></Col>
         </Row>
       </Section>
       <Section title="Basic information">

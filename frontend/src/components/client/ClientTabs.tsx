@@ -6,7 +6,7 @@ import { App, Button, Card, Col, DatePicker, Empty, Form, Image, Input, InputNum
 import { DeleteOutlined, EyeOutlined, FilePdfOutlined, PlusOutlined, ShoppingCartOutlined, UploadOutlined, WhatsAppOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiBlobUrl } from '@/lib/api';
-import { clean, fmtDate, fmtDateTime, fmtTime, humanize, INVOICE_STATUS, money, PACKAGE_STATUS } from '@/lib/format';
+import { clean, fmtDate, fmtDateTime, fmtTime, humanize, INVOICE_STATUS, money, PACKAGE_PROGRESS, PACKAGE_STATUS } from '@/lib/format';
 import { StatusTag } from '../ui';
 
 // ---------------- Consultations ----------------
@@ -87,10 +87,11 @@ export function PackagesTab({ client, onChanged, canSell, canManage }: { client:
             return (
               <Col xs={24} lg={12} key={p.id}>
                 <Card size="small" title={p.name} style={{ opacity: p.status === 'ACTIVE' ? 1 : 0.75 }}
-                  extra={<Space><Tag color={PACKAGE_STATUS[p.status]}>{humanize(p.status)}</Tag>{canManage && <a onClick={() => { setEdit(p); form.setFieldsValue({ expiresAt: dayjs(p.expiresAt), status: p.status, reason: undefined }); }}>Manage</a>}</Space>}>
+                  extra={<Space>{p.progress && <Tag color={PACKAGE_PROGRESS[p.progress].color}>{PACKAGE_PROGRESS[p.progress].label}</Tag>}{p.status !== 'ACTIVE' && p.status !== 'COMPLETED' && <Tag color={PACKAGE_STATUS[p.status]}>{humanize(p.status)}</Tag>}{canManage && <a onClick={() => { setEdit(p); form.setFieldsValue({ expiresAt: dayjs(p.expiresAt), status: p.status, reason: undefined }); }}>Manage</a>}</Space>}>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
                     Bought {fmtDate(p.purchasedAt)} · {money(p.price)} · expires {fmtDate(p.expiresAt)}
                     {p.status === 'ACTIVE' && days <= 14 && <Tag color={days < 0 ? 'red' : 'orange'} style={{ marginLeft: 6 }}>{days < 0 ? 'expired' : `${days} days left`}</Tag>}
+                    <div>Therapist: <b style={{ color: '#1F1D1A' }}>{p.therapists?.length ? p.therapists.map((t: any) => t.name).join(', ') : 'not booked yet'}</b></div>
                   </div>
                   {p.items.map((i: any) => (
                     <div key={i.id} style={{ marginBottom: 8 }}>

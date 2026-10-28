@@ -64,6 +64,7 @@ export const NAV: NavGroup[] = [
     key: 'admin', label: 'Administration', icon: 'setting', items: [
       { path: '/settings', label: 'Centre Settings', roles: MGMT },
       { path: '/settings/audit', label: 'Audit Log', roles: MGMT },
+      { path: '/settings/import', label: 'Data Import (Excel / Sheets)', roles: [...MGMT, 'RECEPTION'] },
     ],
   },
 ];
@@ -72,6 +73,7 @@ export type ReportDef = { key: string; label: string; group: string; frequency: 
 export const REPORT_LIST: ReportDef[] = [
   { key: 'daily-appointments', label: 'Daily appointment & treatment report', group: 'Operations', frequency: 'Daily', roles: [...REPORTS, 'RECEPTION'], description: 'Every appointment of a day with therapist, machine, room and status' },
   { key: 'therapist-sessions', label: 'Therapist-wise completed sessions', group: 'Operations', frequency: 'Daily / Weekly / Monthly', roles: REPORTS, description: 'Sessions, minutes, delivered value, no-shows and commission per therapist' },
+  { key: 'therapist-performance', label: 'Individual therapist performance', group: 'Operations', frequency: 'Daily / Weekly / Monthly', roles: REPORTS, description: 'One therapist’s profile, KPIs, treatment mix, trend, upcoming bookings and full session log' },
   { key: 'machine-utilisation', label: 'Machine utilisation & idle hours', group: 'Operations', frequency: 'Daily / Weekly / Monthly', roles: REPORTS, description: 'Actual vs booked utilisation after deducting downtime' },
   { key: 'followups', label: 'Doctor follow-up due / overdue', group: 'Operations', frequency: 'Daily', roles: [...REPORTS, 'RECEPTION', 'DOCTOR'], description: 'Open review and follow-up tasks due today or overdue' },
   { key: 'package-liability', label: 'Active packages & pending sessions', group: 'Packages', frequency: 'Real time', roles: REPORTS, description: 'Unfulfilled session value (deferred revenue) per active package' },

@@ -44,7 +44,7 @@ function NewClientInner() {
         <Alert type="warning" showIcon style={{ marginBottom: 16 }} title="Possible duplicate" description={dup.message}
           action={<Link href={`/clients/${dup.clientId}`}><Button size="small">Open existing client</Button></Link>} />
       )}
-      <ClientForm form={form} onFinish={submit} initialValues={{ ...splitName(params.get('name')), mobile: params.get('mobile') ?? undefined, gender: params.get('gender') ?? undefined, source: params.get('source') ?? undefined }} />
+      <ClientForm form={form} onFinish={submit} initialValues={{ ...splitName(params.get('name')), mobile: params.get('mobile') ?? undefined, gender: params.get('gender') ?? undefined, source: params.get('source') ?? undefined, offer: params.get('offer') ?? undefined }} />
       <div style={{ position: 'sticky', bottom: 0, background: '#fff', borderTop: '1px solid #ECEAE4', padding: '12px 16px', margin: '0 -24px -24px', display: 'flex', justifyContent: 'flex-end', zIndex: 5 }}>
         <Space>
           <Button onClick={() => router.back()}>Discard</Button>

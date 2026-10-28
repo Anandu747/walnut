@@ -37,6 +37,8 @@ const FEMALE = ['Fatima Al Mansoori', 'Aisha Rahman', 'Mariam Khalid', 'Noura Al
 const MALE = ['Ahmed Al Marzooqi', 'Omar Haddad', 'Khalid Al Rumaithi', 'Yousef Saleh', 'Rashid Al Nuaimi', 'Arjun Menon', 'Rahul Nair', 'Vikram Shetty', 'James Carter', 'Daniel Becker', 'Mohammed Iqbal', 'Faisal Qureshi', 'Saeed Al Ameri', 'Tariq Aziz', 'Ivan Volkov', 'Marco Silva', 'Hamdan Al Kaabi', 'Sultan Al Owais', 'Nikhil Joseph', 'Anas Kareem'] as const;
 const NATIONALITY: Record<string, string> = { Al: 'UAE', Priya: 'India', Anjali: 'India', Divya: 'India', Sneha: 'India', Meera: 'India', Kavya: 'India', Fathima: 'India', Neha: 'India', Riya: 'India', Arjun: 'India', Rahul: 'India', Vikram: 'India', Nikhil: 'India', Anas: 'India', Maria: 'Philippines', Joy: 'Philippines', Angelica: 'Philippines', Olga: 'Russia', Elena: 'Russia', Natalia: 'Russia', Ivan: 'Russia' };
 const SOURCES = ['Instagram', 'Instagram', 'Google', 'Referral', 'Referral', 'Walk-in', 'TikTok', 'Website', 'Facebook'] as const;
+// Marketing offers / campaigns (placeholders — replace with the centre's real promotions).
+const OFFERS = ['Free Body Analysis + 1st Session 50% Off', 'Ramadan Glow 3+1', 'Bridal Sculpt Package 20% Off', 'Refer a Friend – AED 200 Credit', 'New Year Slim Down Bundle', 'Summer Body Cryo Combo'];
 const GOALS = ['Reduce abdominal fat', 'Tone thighs and arms', 'Post-pregnancy body contouring', 'Lose 8 kg before wedding', 'Reduce love handles', 'Improve skin tightness after weight loss', 'Build core muscle and reduce belly', 'Reduce cellulite on thighs', 'General slimming and wellness'];
 const COMPLAINTS = ['Stubborn belly fat not responding to diet', 'Loose skin after weight loss', 'Cellulite on thighs and buttocks', 'Post-partum abdominal laxity', 'Localised fat on flanks', 'Water retention and puffiness', 'Wants to improve muscle tone'];
 const CONDITIONS = [null, null, null, null, 'Hypothyroidism (controlled)', 'PCOS', 'Mild hypertension', 'Type 2 diabetes (diet controlled)', 'Previous C-section (2022)'];
@@ -227,7 +229,7 @@ async function main() {
   type Sale = { date: Date; clientId: string; lines: { kind: 'PACKAGE' | 'SERVICE'; tpl?: (typeof templates)[number]; key?: string; discount: number }[]; payPlan: 'full' | 'split' | 'open' | 'partial'; method: string };
   const sales: Sale[] = [];
   const pkgPlans: { clientId: string; tpl: (typeof templates)[number]; date: Date; discount: number; sale: Sale; dropAfter: number; prefTherapist: string; gender: string; cadence: number }[] = [];
-  const clientRows: { id: string; gender: string; joined: Date; weight: number; height: number; fat: number; waist: number; hip: number; muscle: number; prefTherapist: string; active: boolean; interval: number; whatsapp: boolean }[] = [];
+  const clientRows: { id: string; gender: string; joined: Date; weight: number; height: number; fat: number; waist: number; hip: number; muscle: number; prefTherapist: string; active: boolean; interval: number; whatsapp: boolean; offer: string | null }[] = [];
   const methods = ['CARD', 'CARD', 'CARD', 'CARD', 'CASH', 'CASH', 'BANK_TRANSFER', 'TABBY', 'TABBY'];
 
   let seq = 0;
@@ -244,7 +246,7 @@ async function main() {
         dob: new Date(int(1972, 2001), int(0, 11), int(1, 28)), nationality: p.name.includes(' Al ') ? 'UAE' : NATIONALITY[first] ?? pick(['UAE', 'Lebanon', 'Egypt', 'UK', 'Jordan', 'Germany', 'Italy', 'India']),
         emiratesId: `784-${int(1972, 2001)}-${int(1000000, 9999999)}-${int(1, 9)}`, address: `${pick(['Jumeirah', 'Al Barsha', 'Dubai Marina', 'JLT', 'Downtown', 'Mirdif', 'Al Safa', 'Umm Suqeim', 'Business Bay', 'Arabian Ranches'])}, Dubai`,
         occupation: pick(['Teacher', 'Banker', 'Homemaker', 'Engineer', 'Entrepreneur', 'Doctor', 'Marketing Manager', 'Flight Attendant', 'HR Manager', 'Architect']),
-        source: pick(SOURCES), referredBy: chance(0.2) ? pick(FEMALE) : null,
+        source: pick(SOURCES), referredBy: chance(0.2) ? pick(FEMALE) : null, offer: chance(0.45) ? pick(OFFERS) : null,
         emergencyName: pick([...FEMALE, ...MALE]), emergencyRelation: pick(['Spouse', 'Sister', 'Mother', 'Brother', 'Friend']), emergencyPhone: `05${int(0, 9)}${int(1000000, 9999999)}`,
         conditions: pick(CONDITIONS), allergies: pick(ALLERGIES), medications: pick(MEDS), contraindications: chance(0.1) ? 'Metal implant in left knee – avoid EMS on legs' : null,
         goal: pick(GOALS), targetWeightKg: r2(weight - int(5, 12)), medicalNotes: 'Screening questionnaire completed. No pacemaker, not pregnant.',
@@ -253,7 +255,7 @@ async function main() {
       },
     });
     const prefTherapist = pick(male ? [user.marcial] : [user.mariegold, user.carol, user.aya, user.mariegold, user.carol]);
-    clientRows.push({ id: c.id, gender: p.gender, joined: p.joined, weight, height, fat: r2(male ? 26 + rnd() * 8 : 32 + rnd() * 9), waist: male ? int(96, 112) : int(80, 102), hip: male ? int(100, 112) : int(100, 120), muscle: r2(male ? 34 + rnd() * 6 : 23 + rnd() * 5), prefTherapist, active: true, interval: c.reviewIntervalDays, whatsapp: c.whatsappOptIn });
+    clientRows.push({ id: c.id, gender: p.gender, joined: p.joined, weight, height, fat: r2(male ? 26 + rnd() * 8 : 32 + rnd() * 9), waist: male ? int(96, 112) : int(80, 102), hip: male ? int(100, 112) : int(100, 120), muscle: r2(male ? 34 + rnd() * 6 : 23 + rnd() * 5), prefTherapist, active: true, interval: c.reviewIntervalDays, whatsapp: c.whatsappOptIn, offer: c.offer });
 
     // First visit: consultation + body composition (consult fee waived for ~40% who buy the same day).
     const buysNow = chance(0.8);
@@ -498,7 +500,7 @@ async function main() {
   for (const [i, [name, source, interest, status]] of LEADS.entries()) {
     await prisma.lead.create({
       data: {
-        tenantId: t, name, mobile: `05${int(0, 9)}${int(1000000, 9999999)}`, gender: name.startsWith('Karim') ? 'Male' : 'Female', source, interest, status, ownerId: user.reception,
+        tenantId: t, name, mobile: `05${int(0, 9)}${int(1000000, 9999999)}`, gender: name.startsWith('Karim') ? 'Male' : 'Female', source, interest, status, ownerId: user.reception, offer: i % 3 === 2 ? null : OFFERS[i % OFFERS.length],
         notes: status === 'LOST' ? pick(['Chose a cheaper clinic', 'Budget not available this month']) : status === 'CONSULT_BOOKED' ? 'Free consultation booked' : 'Asked for price list on WhatsApp',
         nextActionAt: status === 'LOST' ? null : addDays(TODAY, int(-1, 4)), createdAt: addDays(TODAY, -int(0, 25) - i),
       },
@@ -510,7 +512,7 @@ async function main() {
     const plan = clientPlans[clientRows.indexOf(c)]; // clientRows were created in clientPlans order
     await prisma.lead.create({
       data: {
-        tenantId: t, name: plan.name, mobile: `05${int(0, 9)}${int(1000000, 9999999)}`, gender: c.gender, source: pick(SOURCES), interest: pick(GOALS), status: 'CONVERTED',
+        tenantId: t, name: plan.name, mobile: `05${int(0, 9)}${int(1000000, 9999999)}`, gender: c.gender, source: pick(SOURCES), interest: pick(GOALS), offer: c.offer, status: 'CONVERTED',
         ownerId: user.reception, clientId: c.id, notes: 'Booked consultation and bought a package', createdAt: addDays(c.joined, -int(2, 10)) , nextActionAt: null,
       },
     });

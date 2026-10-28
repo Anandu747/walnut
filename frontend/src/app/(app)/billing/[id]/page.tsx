@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Alert, App, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Skeleton, Space, Table, Tag } from 'antd';
-import { DollarOutlined, PrinterOutlined, RollbackOutlined, StopOutlined } from '@ant-design/icons';
+import { Alert, App, Button, Card, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Skeleton, Space, Table, Tag, Tooltip } from 'antd';
+import { DollarOutlined, PrinterOutlined, RollbackOutlined, StopOutlined, WhatsAppOutlined } from '@ant-design/icons';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
@@ -19,6 +19,29 @@ function words(n: number): string {
   if (n < 1e6) return `${words(Math.floor(n / 1000))} Thousand${n % 1000 ? ' ' + words(n % 1000) : ''}`;
   return `${words(Math.floor(n / 1e6))} Million${n % 1e6 ? ' ' + words(n % 1e6) : ''}`;
 }
+/** Plain-text invoice summary for WhatsApp (*bold* is WhatsApp markup). */
+function invoiceText(inv: any) {
+  const isCN = inv.kind === 'CREDIT_NOTE';
+  const amt = (v: number | string) => money(v).replace(/ /g, ' ');
+  return [
+    `Hello ${inv.client.name.split(' ')[0]},`,
+    '',
+    `Thank you for choosing ${inv.tenant.name}. Here are your ${isCN ? 'credit note' : 'invoice'} details:`,
+    '',
+    `*${isCN ? 'Credit note' : 'Tax invoice'} ${inv.number}*`,
+    `Date: ${fmtDate(inv.issuedAt)}`,
+    ...inv.items.map((i: any) => `• ${i.description}${i.qty > 1 ? ` × ${i.qty}` : ''} — ${amt(i.lineTotal)}`),
+    '',
+    ...(Number(inv.discount) ? [`Discount: ${amt(inv.discount)}`] : []),
+    `VAT: ${amt(inv.vatAmount)}`,
+    `*Total: ${amt(inv.total)}*`,
+    ...(!isCN ? [`Paid: ${amt(inv.paid)}`, inv.balance > 0 ? `*Balance due: ${amt(inv.balance)}*` : 'Status: Fully paid ✅'] : []),
+    '',
+    `TRN: ${inv.tenant.trn ?? '—'}`,
+    `${inv.tenant.phone ?? ''}`,
+  ].join('\n').trim();
+}
+
 const amountInWords = (v: number) => {
   const a = Math.abs(v), d = Math.floor(a), f = Math.round((a - d) * 100);
   return `UAE Dirhams ${words(d) || 'Zero'}${f ? ` and ${words(f)} Fils` : ''} Only`;
@@ -32,11 +55,23 @@ export default function InvoicePage() {
   const [modal, setModal] = useState<'pay' | 'credit' | 'void' | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+  const [sending, setSending] = useState(false);
 
   if (!inv) return <Skeleton active paragraph={{ rows: 12 }} />;
   const isCN = inv.kind === 'CREDIT_NOTE';
   const live = !isCN && inv.status !== 'VOID';
   const credited = inv.credits.reduce((s: number, c: any) => s + Number(c.total), 0);
+
+  // Open the tab synchronously (before the API call) so the browser doesn't treat it as a pop-up.
+  const whatsapp = async () => {
+    const w = window.open('about:blank', '_blank');
+    setSending(true);
+    try {
+      const r = await api<any>('/messages', { method: 'POST', body: { clientId: inv.client.id, body: invoiceText(inv), channel: 'WHATSAPP' } });
+      if (w) w.location.href = r.waLink; else window.open(r.waLink, '_blank');
+      message.success('Invoice sent to WhatsApp — logged in the client’s messages');
+    } catch (e) { w?.close(); message.error((e as Error).message); } finally { setSending(false); }
+  };
 
   const open = (m: typeof modal) => {
     form.resetFields();
@@ -60,6 +95,9 @@ export default function InvoicePage() {
       <PageHeader crumb="Billing" title={<>{inv.number} <Tag color={isCN ? 'purple' : INVOICE_STATUS[inv.status]} style={{ verticalAlign: 'middle' }}>{isCN ? 'Credit note' : humanize(inv.status)}</Tag></>}
         sub={<>For <Link href={`/clients/${inv.client.id}`}>{inv.client.name}</Link> · issued {fmtDateTime(inv.issuedAt)}{inv.createdBy ? ` by ${inv.createdBy}` : ''}</>}
         extra={<>
+          <Tooltip title={inv.client.whatsappOptIn ? `Send to ${inv.client.mobile}` : 'Client has not opted in to WhatsApp messages'}>
+            <Button icon={<WhatsAppOutlined style={{ color: inv.client.whatsappOptIn ? '#25D366' : undefined }} />} loading={sending} disabled={!inv.client.whatsappOptIn || inv.status === 'VOID'} onClick={whatsapp}>WhatsApp</Button>
+          </Tooltip>
           <Button icon={<PrinterOutlined />} onClick={() => window.print()}>Print / PDF</Button>
           {live && inv.balance > 0 && hasRole('RECEPTION', 'MANAGER', 'ACCOUNTANT') && <Button type="primary" icon={<DollarOutlined />} onClick={() => open('pay')}>Record payment</Button>}
           {live && hasRole('MANAGER', 'ACCOUNTANT') && Number(inv.total) + credited > 0 && <Button icon={<RollbackOutlined />} onClick={() => open('credit')}>Credit note / refund</Button>}

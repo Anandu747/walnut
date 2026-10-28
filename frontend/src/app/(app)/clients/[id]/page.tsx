@@ -95,7 +95,7 @@ function ClientInner() {
           <Descriptions column={{ xs: 1, md: 2, xl: 4 }} size="small" items={[
             { label: 'Mobile', children: c.mobile }, { label: 'Email', children: c.email ?? '—' }, { label: 'Date of birth', children: c.dob ? `${fmtDate(c.dob)} (${age(c.dob)} yrs)` : '—' },
             { label: 'Nationality', children: c.nationality ?? '—' }, { label: 'Emirates ID', children: c.emiratesId ?? '—' }, { label: 'Address', children: c.address ?? '—' },
-            { label: 'Source', children: `${c.source ?? '—'}${c.referredBy ? ` (ref. ${c.referredBy})` : ''}` }, { label: 'Emergency contact', children: c.emergencyName ? `${c.emergencyName} (${c.emergencyRelation}) ${c.emergencyPhone ?? ''}` : '—' },
+            { label: 'Source', children: `${c.source ?? '—'}${c.referredBy ? ` (ref. ${c.referredBy})` : ''}` }, { label: 'Marketing offer', children: c.offer ?? '—' }, { label: 'Emergency contact', children: c.emergencyName ? `${c.emergencyName} (${c.emergencyRelation}) ${c.emergencyPhone ?? ''}` : '—' },
             { label: 'Conditions', children: c.conditions ?? 'None reported' }, { label: 'Medications', children: c.medications ?? 'None' }, { label: 'Allergies', children: c.allergies ?? 'None known' },
             { label: 'Consents', children: <Space size={4} wrap><Tag color={c.consentSigned ? 'green' : 'orange'}>Treatment {c.consentSigned ? '✓' : 'pending'}</Tag><Tag color={c.photoConsent ? 'green' : 'default'}>Photos {c.photoConsent ? '✓' : '✗'}</Tag><Tag color={c.whatsappOptIn ? 'green' : 'default'}>WhatsApp {c.whatsappOptIn ? '✓' : '✗'}</Tag></Space> },
           ]} />

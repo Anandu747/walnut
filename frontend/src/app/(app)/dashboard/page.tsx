@@ -1,9 +1,10 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Button, Card, Col, Empty, Row, Segmented, Skeleton, Table } from 'antd';
+import { Button, Card, Col, DatePicker, Empty, Row, Segmented, Skeleton, Table } from 'antd';
 import { CalendarOutlined, RightOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
+import dayjs, { Dayjs } from 'dayjs';
 import { useAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
 import { compact, money, num, STATUS } from '@/lib/format';
@@ -11,14 +12,31 @@ import { SERIES } from '@/lib/theme';
 import { PageHeader, StatTile, StatusDot, Legend } from '@/components/ui';
 import { ColumnChart, MeterList } from '@/components/charts';
 
-const PERIODS = { week: 'Last 7 days', month: 'Month to date', year: 'Year to date' } as const;
-const VS = { week: 'prior 7 days', month: 'same days last month', year: 'same period last year' } as const;
+type Range = [Dayjs, Dayjs]; // inclusive days
+/** Preset → its date range and the like-for-like window it is compared with. */
+const PRESETS: Record<string, { label: string; range: () => Range; prev: (r: Range) => Range; vs: string }> = {
+  today: { label: 'Today', range: () => [dayjs(), dayjs()], prev: ([a, b]) => [a.subtract(1, 'day'), b.subtract(1, 'day')], vs: 'yesterday' },
+  yesterday: { label: 'Yesterday', range: () => [dayjs().subtract(1, 'day'), dayjs().subtract(1, 'day')], prev: ([a, b]) => [a.subtract(1, 'day'), b.subtract(1, 'day')], vs: 'the day before' },
+  week: { label: 'Last 7 days', range: () => [dayjs().subtract(6, 'day'), dayjs()], prev: ([a, b]) => [a.subtract(7, 'day'), b.subtract(7, 'day')], vs: 'prior 7 days' },
+  month: { label: 'Month to date', range: () => [dayjs().startOf('month'), dayjs()], prev: ([a, b]) => [a.subtract(1, 'month'), b.subtract(1, 'month')], vs: 'same days last month' },
+  lastMonth: { label: 'Last month', range: () => [dayjs().subtract(1, 'month').startOf('month'), dayjs().subtract(1, 'month').endOf('month')], prev: ([a]) => [a.subtract(1, 'month').startOf('month'), a.subtract(1, 'month').endOf('month')], vs: 'the month before' },
+  year: { label: 'Year to date', range: () => [dayjs().startOf('year'), dayjs()], prev: ([a, b]) => [a.subtract(1, 'year'), b.subtract(1, 'year')], vs: 'same period last year' },
+};
+const day0 = (d: Dayjs) => d.startOf('day').toISOString();
+const dayEnd = (d: Dayjs) => d.add(1, 'day').startOf('day').toISOString();
 
 export default function Dashboard() {
   const { user, hasRole } = useAuth();
   const router = useRouter();
-  const [period, setPeriod] = useState<'week' | 'month' | 'year'>('month');
-  const { data: d, loading } = useApi<any>(`/reports/dashboard?period=${period}`);
+  const [preset, setPreset] = useState<string>('month');
+  const [custom, setCustom] = useState<Range>([dayjs().subtract(13, 'day'), dayjs()]);
+  const range = preset === 'custom' ? custom : PRESETS[preset].range();
+  const days = range[1].startOf('day').diff(range[0].startOf('day'), 'day') + 1;
+  // Custom ranges compare with the equally long period just before (the API default).
+  const prev = preset === 'custom' ? null : PRESETS[preset].prev(range);
+  const vs = preset === 'custom' ? `previous ${days} day${days > 1 ? 's' : ''}` : PRESETS[preset].vs;
+  const label = preset === 'custom' ? `${range[0].format('DD MMM')} – ${range[1].format('DD MMM')}` : PRESETS[preset].label;
+  const { data: d, loading } = useApi<any>(`/reports/dashboard?from=${day0(range[0])}&to=${dayEnd(range[1])}${prev ? `&prevFrom=${day0(prev[0])}&prevTo=${dayEnd(prev[1])}` : ''}`);
   const finance = hasRole('MANAGER', 'ACCOUNTANT');
   const hour = dayjs().hour();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -29,19 +47,23 @@ export default function Dashboard() {
     <>
       <PageHeader
         crumb={finance ? 'Management overview' : 'Overview'} title={`${greet}, ${user?.name.split(' (')[0]}`}
-        sub={`${dayjs(d?.from).format('DD MMM')} – ${dayjs(d?.to).subtract(1, 'day').format('DD MMM YYYY')} · compared with ${VS[period]}`}
-        extra={<Segmented value={period} onChange={(v) => setPeriod(v as typeof period)} options={Object.entries(PERIODS).map(([value, label]) => ({ value, label }))} />}
+        sub={`${days === 1 ? range[0].format('ddd DD MMM YYYY') : `${range[0].format('DD MMM')} – ${range[1].format('DD MMM YYYY')}`} · compared with ${vs}`}
+        extra={<>
+          <Segmented value={preset} onChange={(v) => setPreset(String(v))} options={[...Object.entries(PRESETS).map(([value, p]) => ({ value, label: p.label })), { value: 'custom', label: 'Custom' }]} />
+          <DatePicker.RangePicker value={range} allowClear={false} format="DD MMM YYYY" disabledDate={(x) => x.isAfter(dayjs(), 'day')}
+            onChange={(v) => { if (v?.[0] && v[1]) { setCustom([v[0], v[1]]); setPreset('custom'); } }} />
+        </>}
       />
       {!d ? <Skeleton active paragraph={{ rows: 10 }} /> : (
         <div style={{ opacity: loading ? 0.6 : 1, transition: 'opacity .2s' }}>
           <Row gutter={[16, 16]}>
             {finance && <>
-              <Col xs={12} xl={6}><StatTile label="Package & service sales" value={money(k.sales, false)} current={k.sales} previous={k.prev.sales} vs={VS[period]} sub="excl. VAT" /></Col>
-              <Col xs={12} xl={6}><StatTile label="Payments collected" value={money(k.collections, false)} current={k.collections} previous={k.prev.collections} vs={VS[period]} sub={k.refunds ? `after ${money(k.refunds, false)} refunds` : 'cash & electronic'} /></Col>
-              <Col xs={12} xl={6}><StatTile label="Delivered treatment value" value={money(k.delivered, false)} current={k.delivered} previous={k.prev.delivered} vs={VS[period]} sub="revenue earned on completed sessions" /></Col>
+              <Col xs={12} xl={6}><StatTile label="Package & service sales" value={money(k.sales, false)} current={k.sales} previous={k.prev.sales} vs={vs} sub="excl. VAT" /></Col>
+              <Col xs={12} xl={6}><StatTile label="Payments collected" value={money(k.collections, false)} current={k.collections} previous={k.prev.collections} vs={vs} sub={k.refunds ? `after ${money(k.refunds, false)} refunds` : 'cash & electronic'} /></Col>
+              <Col xs={12} xl={6}><StatTile label="Delivered treatment value" value={money(k.delivered, false)} current={k.delivered} previous={k.prev.delivered} vs={vs} sub="revenue earned on completed sessions" /></Col>
             </>}
-            <Col xs={12} xl={6}><StatTile label="New clients" value={num(k.newClients)} current={k.newClients} previous={k.prev.newClients} vs={VS[period]} sub="first-time registrations" onClick={() => router.push('/clients?filter=new-30')} /></Col>
-            <Col xs={12} xl={6}><StatTile label="Completed sessions" value={num(k.sessions)} current={k.sessions} previous={k.prev.sessions} vs={VS[period]} sub="all treatments" /></Col>
+            <Col xs={12} xl={6}><StatTile label="New clients" value={num(k.newClients)} current={k.newClients} previous={k.prev.newClients} vs={vs} sub="first-time registrations" onClick={() => router.push('/clients?filter=new-30')} /></Col>
+            <Col xs={12} xl={6}><StatTile label="Completed sessions" value={num(k.sessions)} current={k.sessions} previous={k.prev.sessions} vs={vs} sub="all treatments" /></Col>
             {finance && <>
               <Col xs={12} xl={6}><StatTile label="Outstanding balances" value={money(k.outstanding, false)} sub="unpaid invoices · all time" onClick={() => router.push('/billing?outstanding=1')} /></Col>
               <Col xs={12} xl={6}><StatTile label="Package liability" value={money(k.liability, false)} sub={`${num(k.pendingSessions)} unused sessions on ${k.activePackages} active packages`} onClick={() => router.push('/reports/package-liability')} /></Col>
@@ -56,7 +78,7 @@ export default function Dashboard() {
                   <ColumnChart
                     data={d.trend} x="key" height={260} format={(v) => money(v, false)}
                     series={[{ key: 'sales', label: 'Sales', color: SERIES.gold }, { key: 'collections', label: 'Collections', color: SERIES.blue }]}
-                    xFormat={(s) => (period === 'year' ? dayjs(s + '-01').format('MMM') : dayjs(s).format('DD MMM'))}
+                    xFormat={(s) => (d.granularity === 'month' ? dayjs(s + '-01').format('MMM YY') : dayjs(s).format('DD MMM'))}
                   />
                 </Card>
               </Col>
@@ -82,11 +104,11 @@ export default function Dashboard() {
             </Col>
 
             <Col xs={24} xl={finance ? 12 : 12}>
-              <Card title="Therapist performance" extra={<span className="muted">{PERIODS[period]}</span>}>
+              <Card title="Therapist performance" extra={<span className="muted">{label}</span>}>
                 <Table
                   size="small" rowKey="id" pagination={false} dataSource={d.therapists}
                   columns={[
-                    { title: 'Therapist', dataIndex: 'name', render: (v, r: any) => <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: r.color ?? '#ccc' }} />{v}</span> },
+                    { title: 'Therapist', dataIndex: 'name', render: (v, r: any) => <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: r.color ?? '#ccc' }} />{finance ? <Link href={`/reports/therapist-performance?id=${r.id}`}>{v}</Link> : v}</span> },
                     { title: 'Sessions', dataIndex: 'sessions', align: 'right' },
                     { title: 'Hours', dataIndex: 'minutes', align: 'right', render: (v) => (v / 60).toFixed(1) },
                     ...(finance ? [{ title: 'Delivered', dataIndex: 'value', align: 'right' as const, render: (v: number) => compact(v) }] : []),

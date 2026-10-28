@@ -1,13 +1,14 @@
 'use client';
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { App, Badge, Button, Card, Col, DatePicker, Dropdown, Form, Input, Modal, Row, Select, Tag } from 'antd';
-import { MoreOutlined, PhoneOutlined, PlusOutlined, UserAddOutlined } from '@ant-design/icons';
+import { App, Badge, Button, Card, Col, DatePicker, Dropdown, Form, Input, Modal, Row, Segmented, Select, Space, Table, Tag } from 'antd';
+import { AppstoreOutlined, GiftOutlined, MoreOutlined, PhoneOutlined, PlusOutlined, UnorderedListOutlined, UploadOutlined, UserAddOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { useApi } from '@/lib/useApi';
 import { fmtDate, SOURCES } from '@/lib/format';
 import { PageHeader, StatTile } from '@/components/ui';
+import OfferSelect, { loadOffers } from '@/components/OfferSelect';
 
 const STAGES = [
   { key: 'NEW', label: 'New enquiry', color: '#E0A800' }, { key: 'CONTACTED', label: 'Contacted', color: '#2a78d6' },
@@ -21,6 +22,9 @@ function LeadsInner() {
   const { data = [], reload } = useApi<any[]>('/leads', []);
   const [edit, setEdit] = useState<any>(params.get('new') ? {} : null);
   const [form] = Form.useForm();
+  const [view, setView] = useState<'board' | 'list'>('board');
+  const [offer, setOffer] = useState<string>();
+  const [q, setQ] = useState('');
   useEffect(() => { if (edit) form.setFieldsValue({ source: 'Instagram', status: 'NEW', ...edit, nextActionAt: edit.nextActionAt ? dayjs(edit.nextActionAt) : dayjs().add(1, 'day') }); }, [edit, form]);
 
   const move = async (l: any, status: string) => {
@@ -30,26 +34,53 @@ function LeadsInner() {
     try {
       const body = { ...v, nextActionAt: v.nextActionAt?.toISOString() };
       if (edit.id) await api(`/leads/${edit.id}`, { method: 'PATCH', body }); else await api('/leads', { method: 'POST', body });
-      message.success('Lead saved'); setEdit(null); reload();
+      message.success('Lead saved'); setEdit(null); reload(); loadOffers(true);
     } catch (e) { message.error((e as Error).message); }
   };
-  const convert = (l: any) => router.push(`/clients/new?${new URLSearchParams({ leadId: l.id, name: l.name, mobile: l.mobile, ...(l.gender && { gender: l.gender }), source: l.source })}`);
+  const convert = (l: any) => router.push(`/clients/new?${new URLSearchParams({ leadId: l.id, name: l.name, mobile: l.mobile, ...(l.gender && { gender: l.gender }), ...(l.offer && { offer: l.offer }), source: l.source })}`);
+  const stage = (k: string) => STAGES.find((x) => x.key === k)!;
+  const offers = [...new Set(data.map((l) => l.offer).filter(Boolean))].sort() as string[];
+  const shown = data.filter((l) => (!offer || l.offer === offer) && (!q || `${l.name} ${l.mobile}`.toLowerCase().includes(q.toLowerCase())));
   const month = data.filter((l) => dayjs(l.createdAt).isAfter(dayjs().startOf('month')));
   const conv = data.filter((l) => l.status === 'CONVERTED').length, closed = conv + data.filter((l) => l.status === 'LOST').length;
 
   return (
     <>
       <PageHeader crumb="Clients" title="Leads & Enquiries" sub="Track Instagram, Google and walk-in enquiries until they become clients"
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setEdit({})}>Add enquiry</Button>} />
+        extra={<>
+          <Button icon={<UploadOutlined />} onClick={() => router.push('/settings/import?type=leads')}>Import</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setEdit({})}>Add enquiry</Button>
+        </>} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 16, marginBottom: 16 }}>
         <StatTile label="Enquiries this month" value={month.length} />
         <StatTile label="Open pipeline" value={data.filter((l) => !['CONVERTED', 'LOST'].includes(l.status)).length} />
         <StatTile label="Conversion rate" value={closed ? `${Math.round((conv / closed) * 100)}%` : '—'} sub="converted ÷ closed" />
         <StatTile label="Action due today" value={data.filter((l) => l.nextActionAt && !['CONVERTED', 'LOST'].includes(l.status) && dayjs(l.nextActionAt).isBefore(dayjs().endOf('day'))).length} />
       </div>
+      <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
+        <Segmented value={view} onChange={(v) => setView(v as typeof view)} options={[{ value: 'board', label: 'Board', icon: <AppstoreOutlined /> }, { value: 'list', label: 'List', icon: <UnorderedListOutlined /> }]} />
+        <Space wrap>
+          <Select allowClear placeholder="Marketing offer" style={{ width: 280 }} value={offer} onChange={setOffer} options={offers.map((value) => ({ value, label: `${value} (${data.filter((l) => l.offer === value).length})` }))} />
+          <Input.Search allowClear placeholder="Name or mobile" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
+        </Space>
+      </Space>
+      {view === 'list' ? (
+        <Card styles={{ body: { padding: 0 } }}>
+          <Table rowKey="id" dataSource={shown} size="middle" pagination={{ pageSize: 20 }} scroll={{ x: 900 }} onRow={(l) => ({ onClick: () => setEdit(l), style: { cursor: 'pointer' } })}
+            columns={[
+              { title: 'Name', render: (_, l) => <div><b>{l.name}</b><div className="muted" style={{ fontSize: 12 }}>{l.mobile}</div></div> },
+              { title: 'Source', dataIndex: 'source', render: (v) => <Tag>{v}</Tag> },
+              { title: 'Offer selected', dataIndex: 'offer', render: (v) => v ? <Tag color="magenta" icon={<GiftOutlined />}>{v}</Tag> : <span className="muted">—</span> },
+              { title: 'Interested in', dataIndex: 'interest', render: (v) => v ?? '—' },
+              { title: 'Stage', render: (_, l) => <Tag color={stage(l.status).color}>{stage(l.status).label}</Tag> },
+              { title: 'Next action', render: (_, l) => l.nextActionAt && !['CONVERTED', 'LOST'].includes(l.status) ? fmtDate(l.nextActionAt) : '—' },
+              { title: 'Enquired', sorter: (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt), render: (_, l) => fmtDate(l.createdAt) },
+            ]} />
+        </Card>
+      ) : (
       <Row gutter={12} wrap={false} style={{ overflowX: 'auto', paddingBottom: 8 }}>
         {STAGES.map((s) => {
-          const items = data.filter((l) => l.status === s.key);
+          const items = shown.filter((l) => l.status === s.key);
           return (
             <Col key={s.key} flex="1 0 240px">
               <div style={{ background: '#EFEDE7', borderRadius: 12, padding: 10, minHeight: 360 }}>
@@ -68,6 +99,7 @@ function LeadsInner() {
                       </div>
                       <div className="muted" style={{ fontSize: 12 }}><PhoneOutlined /> {l.mobile}</div>
                       {l.interest && <div style={{ fontSize: 13, marginTop: 4 }}>{l.interest}</div>}
+                      {l.offer && <Tag color="magenta" icon={<GiftOutlined />} style={{ marginTop: 4, whiteSpace: 'normal' }}>{l.offer}</Tag>}
                       <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Tag>{l.source}</Tag>
                         {l.nextActionAt && !['CONVERTED', 'LOST'].includes(l.status) && <span style={{ fontSize: 12, color: dayjs(l.nextActionAt).isBefore(dayjs(), 'day') ? '#C8372D' : '#8A867E' }}>next: {fmtDate(l.nextActionAt)}</span>}
@@ -81,6 +113,7 @@ function LeadsInner() {
           );
         })}
       </Row>
+      )}
       <Modal open={!!edit} onCancel={() => setEdit(null)} title={edit?.id ? 'Edit enquiry' : 'New enquiry'} okText="Save" onOk={() => form.submit()} destroyOnHidden
         footer={(_, { OkBtn, CancelBtn }) => <>{edit?.id && edit.status !== 'CONVERTED' && <Button icon={<UserAddOutlined />} onClick={() => convert(edit)} style={{ float: 'left' }}>Register as client</Button>}<CancelBtn /><OkBtn /></>}>
         <Form form={form} layout="vertical" onFinish={save}>
@@ -92,6 +125,7 @@ function LeadsInner() {
             <Col span={8}><Form.Item name="status" label="Stage"><Select options={STAGES.map((s) => ({ value: s.key, label: s.label }))} /></Form.Item></Col>
             <Col span={16}><Form.Item name="interest" label="Interested in"><Input placeholder="e.g. Emsculpt for abdomen" /></Form.Item></Col>
             <Col span={8}><Form.Item name="nextActionAt" label="Next action"><DatePicker style={{ width: '100%' }} format="DD MMM" /></Form.Item></Col>
+            <Col span={24}><Form.Item name="offer" label="Marketing offer selected"><OfferSelect /></Form.Item></Col>
             <Col span={24}><Form.Item name="notes" label="Notes"><Input.TextArea rows={2} /></Form.Item></Col>
           </Row>
         </Form>

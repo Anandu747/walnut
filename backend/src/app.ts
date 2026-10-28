@@ -11,6 +11,7 @@ import appointmentRoutes from './routes/appointments';
 import reportRoutes from './routes/reports';
 import billingRoutes from './routes/billing';
 import crmRoutes from './routes/crm';
+import importRoutes from './routes/import';
 
 if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
 
@@ -21,7 +22,7 @@ app.use(express.json({ limit: '12mb' })); // documents are uploaded as base64
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
-app.use('/api', auth, masterRoutes, clientRoutes, appointmentRoutes, billingRoutes, crmRoutes, reportRoutes);
+app.use('/api', auth, masterRoutes, clientRoutes, appointmentRoutes, billingRoutes, crmRoutes, importRoutes, reportRoutes);
 app.use(errorHandler);
 
 export default app;

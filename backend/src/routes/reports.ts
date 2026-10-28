@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
+import { HttpError } from '../lib/http';
 import { requireRole } from '../middleware/auth';
 
 const r = Router();
@@ -40,17 +41,18 @@ async function packageLiability(tenantId: string) {
 }
 
 r.get('/reports/dashboard', async (req, res) => {
-  const q = z.object({ period: z.enum(['week', 'month', 'year']).default('month') }).parse(req.query);
+  // [from, to) is any range the user picks (presets such as Yesterday or Month to date are built by the client).
+  // The comparison window defaults to the equally long period immediately before; presets may pass their own (e.g. same days last year).
+  const q = z.object({
+    from: z.coerce.date().optional(), to: z.coerce.date().optional(), prevFrom: z.coerce.date().optional(), prevTo: z.coerce.date().optional(),
+  }).refine((x) => !x.from || !x.to || x.from < x.to, 'from must be before to').parse(req.query);
   const t = req.auth.tenantId;
-  const now = new Date();
-  const today = sod(now);
-  let from: Date, prevFrom: Date;
-  if (q.period === 'week') { from = new Date(today.getTime() - 6 * DAY); prevFrom = new Date(from.getTime() - 7 * DAY); }
-  else if (q.period === 'month') { from = new Date(today.getFullYear(), today.getMonth(), 1); prevFrom = new Date(today.getFullYear(), today.getMonth() - 1, 1); }
-  else { from = new Date(today.getFullYear(), 0, 1); prevFrom = new Date(today.getFullYear() - 1, 0, 1); }
-  const to = new Date(today.getTime() + DAY);
-  // Compare like-for-like: the same number of elapsed days in the previous period.
-  const prevTo = new Date(prevFrom.getTime() + (to.getTime() - from.getTime()));
+  const today = sod(new Date());
+  const from = q.from ?? new Date(today.getFullYear(), today.getMonth(), 1);
+  const to = q.to ?? new Date(today.getTime() + DAY);
+  const prevFrom = q.prevFrom ?? new Date(from.getTime() - (to.getTime() - from.getTime()));
+  const prevTo = q.prevTo ?? new Date(prevFrom.getTime() + (to.getTime() - from.getTime()));
+  const monthly = to.getTime() - from.getTime() > 92 * DAY; // long ranges trend by month, short ones by day
 
   const [cur, prev, newClients, prevNewClients, todays, sessions, machines, blocks, therapists, liability, followDue, outstanding] = await Promise.all([
     money(t, from, to), money(t, prevFrom, prevTo),
@@ -66,14 +68,14 @@ r.get('/reports/dashboard', async (req, res) => {
     prisma.invoice.findMany({ where: { tenantId: t, kind: 'INVOICE', status: { in: ['ISSUED', 'PARTIALLY_PAID'] } }, select: { total: true, paid: true } }),
   ]);
 
-  // Trend buckets: days for week/month, months for year.
+  // Trend buckets: days for short ranges, months for long ones.
   const [invs, pays] = await Promise.all([
     prisma.invoice.findMany({ where: { tenantId: t, issuedAt: { gte: from, lt: to }, status: { not: 'VOID' } }, select: { issuedAt: true, taxable: true } }),
     prisma.payment.findMany({ where: { tenantId: t, paidAt: { gte: from, lt: to } }, select: { paidAt: true, amount: true, kind: true } }),
   ]);
-  const key = (d: Date) => q.period === 'year' ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const key = (d: Date) => monthly ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const buckets: { key: string; sales: number; collections: number; delivered: number }[] = [];
-  if (q.period === 'year') for (let m = 0; m <= today.getMonth(); m++) buckets.push({ key: key(new Date(today.getFullYear(), m, 1)), sales: 0, collections: 0, delivered: 0 });
+  if (monthly) for (let m = new Date(from.getFullYear(), from.getMonth(), 1); m < to; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) buckets.push({ key: key(m), sales: 0, collections: 0, delivered: 0 });
   else for (let d = new Date(from); d < to; d = new Date(d.getTime() + DAY)) buckets.push({ key: key(d), sales: 0, collections: 0, delivered: 0 });
   const bk = new Map(buckets.map((b) => [b.key, b]));
   for (const i of invs) { const b = bk.get(key(i.issuedAt)); if (b) b.sales += Number(i.taxable); }
@@ -110,7 +112,7 @@ r.get('/reports/dashboard', async (req, res) => {
       followUpsDue: followDue,
   };
   res.json({
-    period: q.period, from, to, prevFrom, prevTo,
+    from, to, prevFrom, prevTo, granularity: monthly ? 'month' : 'day',
     kpis: finance ? kpis : { sessions: cur.sessions, newClients, followUpsDue: followDue, prev: { sessions: prev.sessions, newClients: prevNewClients } },
     today: {
       total: todays.length,
@@ -167,12 +169,77 @@ r.get('/reports/therapist-sessions', requireRole(...MGMT), async (req, res) => {
     const value = mine.reduce((t, x) => t + Number(x.value), 0);
     const count = (st: string) => appts.find((a) => a.therapistId === s.id && a.status === st)?._count ?? 0;
     return {
-      therapist: s.name, designation: s.designation, completedSessions: mine.length, treatmentMinutes: Math.round(mine.reduce((t, x) => t + mins(x.actualStart, x.actualEnd), 0)),
+      id: s.id, therapist: s.name, designation: s.designation, completedSessions: mine.length, treatmentMinutes: Math.round(mine.reduce((t, x) => t + mins(x.actualStart, x.actualEnd), 0)),
       avgMinutes: mine.length ? Math.round(mine.reduce((t, x) => t + mins(x.actualStart, x.actualEnd), 0) / mine.length) : 0,
       deliveredValue: r2(value), noShows: count('NO_SHOW'), cancelled: count('CANCELLED'),
       commission: r2(value * Number(s.commissionPct ?? 0) / 100),
     };
   }));
+});
+
+/** One therapist's profile, KPIs, treatment mix, trend and session log for [from, to). */
+r.get('/reports/therapist/:id', requireRole(...MGMT), async (req, res) => {
+  const q = range.parse(req.query);
+  const t = req.auth.tenantId;
+  const th = await prisma.user.findFirst({
+    where: { id: String(req.params.id), tenantId: t },
+    select: { id: true, name: true, email: true, phone: true, designation: true, gender: true, color: true, commissionPct: true, role: true, active: true, lastLoginAt: true, createdAt: true, skills: { select: { treatment: { select: { name: true } } } } },
+  });
+  if (!th) throw new HttpError(404, 'Therapist not found');
+  const [tenant, sessions, appts, leave, upcoming] = await Promise.all([
+    prisma.tenant.findUniqueOrThrow({ where: { id: t } }),
+    prisma.sessionRecord.findMany({
+      where: { tenantId: t, therapistId: th.id, actualStart: { gte: q.from, lt: q.to } }, orderBy: { actualStart: 'desc' },
+      include: { appointment: { select: { client: { select: { id: true, name: true, clientNo: true } }, treatment: { select: { name: true } }, machine: { select: { code: true } }, room: { select: { name: true } }, clientPackageItemId: true } } },
+    }),
+    prisma.appointment.groupBy({ by: ['status'], where: { tenantId: t, therapistId: th.id, startAt: { gte: q.from, lt: q.to } }, _count: true }),
+    prisma.resourceBlock.findMany({ where: { tenantId: t, kind: 'THERAPIST', resourceId: th.id, startAt: { lt: q.to }, endAt: { gt: q.from } } }),
+    prisma.appointment.findMany({
+      where: { tenantId: t, therapistId: th.id, startAt: { gte: new Date() }, status: { in: [...LIVE] } }, orderBy: { startAt: 'asc' }, take: 10,
+      select: { id: true, startAt: true, status: true, client: { select: { id: true, name: true } }, treatment: { select: { name: true } } },
+    }),
+  ]);
+  const count = (st: string) => appts.find((a) => a.status === st)?._count ?? 0;
+  const booked = appts.reduce((s, a) => s + a._count, 0);
+  const minutes = Math.round(sessions.reduce((s, x) => s + mins(x.actualStart, x.actualEnd), 0));
+  const value = r2(sessions.reduce((s, x) => s + Number(x.value), 0));
+  // Available = operating minutes over the range minus leave / blocked time.
+  const days = Math.max(1, Math.round((q.to.getTime() - q.from.getTime()) / DAY));
+  const away = leave.reduce((s, b) => s + mins(b.startAt < q.from ? q.from : b.startAt, b.endAt > q.to ? q.to : b.endAt), 0);
+  const available = Math.max(0, days * (tenant.closeMin - tenant.openMin) - away);
+
+  const monthly = days > 92;
+  const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}${monthly ? '' : `-${String(d.getDate()).padStart(2, '0')}`}`;
+  const trend: { key: string; sessions: number; value: number }[] = [];
+  if (monthly) for (let m = new Date(q.from.getFullYear(), q.from.getMonth(), 1); m < q.to; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) trend.push({ key: key(m), sessions: 0, value: 0 });
+  else for (let d = sod(q.from); d < q.to; d = new Date(d.getTime() + DAY)) trend.push({ key: key(d), sessions: 0, value: 0 });
+  const bk = new Map(trend.map((b) => [b.key, b]));
+  const mix = new Map<string, { treatment: string; sessions: number; minutes: number; value: number }>();
+  for (const s of sessions) {
+    const b = bk.get(key(s.actualStart)); if (b) { b.sessions++; b.value = r2(b.value + Number(s.value)); }
+    const n = s.appointment.treatment.name;
+    const v = mix.get(n) ?? { treatment: n, sessions: 0, minutes: 0, value: 0 };
+    v.sessions++; v.minutes += Math.round(mins(s.actualStart, s.actualEnd)); v.value = r2(v.value + Number(s.value));
+    mix.set(n, v);
+  }
+
+  const { skills, ...profile } = th;
+  res.json({
+    profile: { ...profile, skills: skills.map((s) => s.treatment.name).sort() },
+    kpis: {
+      completedSessions: sessions.length, treatmentMinutes: minutes, avgMinutes: sessions.length ? Math.round(minutes / sessions.length) : 0,
+      deliveredValue: value, commission: r2(value * Number(th.commissionPct ?? 0) / 100), uniqueClients: new Set(sessions.map((s) => s.appointment.client.id)).size,
+      booked, noShows: count('NO_SHOW'), cancelled: count('CANCELLED'), completionPct: pct(count('COMPLETED'), booked - count('CANCELLED')),
+      utilisationPct: pct(minutes, available), availableMinutes: Math.round(available), leaveMinutes: Math.round(away),
+    },
+    trend, granularity: monthly ? 'month' : 'day',
+    treatments: [...mix.values()].sort((a, b) => b.sessions - a.sessions),
+    sessions: sessions.map((s) => ({
+      id: s.id, start: s.actualStart, end: s.actualEnd, minutes: Math.round(mins(s.actualStart, s.actualEnd)), value: Number(s.value), notes: s.notes,
+      client: s.appointment.client, treatment: s.appointment.treatment.name, machine: s.appointment.machine?.code ?? null, room: s.appointment.room.name, fromPackage: !!s.appointment.clientPackageItemId,
+    })),
+    upcoming,
+  });
 });
 
 r.get('/reports/daily-appointments', async (req, res) => {

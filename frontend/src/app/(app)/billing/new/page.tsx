@@ -1,17 +1,18 @@
 'use client';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Alert, App, Button, Card, Col, Divider, Empty, Input, InputNumber, Row, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
-import { DeleteOutlined, GiftOutlined, PlusOutlined } from '@ant-design/icons';
+import { Alert, App, Badge, Button, Card, Col, Divider, Empty, Input, InputNumber, Row, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
+import { CheckCircleFilled, DeleteOutlined, GiftOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { money, PAY_METHODS } from '@/lib/format';
 import { PageHeader } from '@/components/ui';
 import ClientSelect from '@/components/ClientSelect';
 
-type Line = { key: number; kind: 'PACKAGE' | 'SERVICE' | 'OTHER'; packageTemplateId?: string; treatmentId?: string; description: string; detail?: string; qty: number; unitPrice: number; discount: number; taxCategory: 'STANDARD' | 'ZERO' | 'EXEMPT' };
+type Line = { key: number; sessions?: number; kind: 'PACKAGE' | 'SERVICE' | 'OTHER'; packageTemplateId?: string; treatmentId?: string; description: string; detail?: string; qty: number; unitPrice: number; discount: number; taxCategory: 'STANDARD' | 'ZERO' | 'EXEMPT' };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 let seq = 1;
+const sessionsIn = (t: any) => t.items.reduce((s: number, i: any) => s + i.sessions, 0);
 
 function NewInvoiceInner() {
   const params = useSearchParams();
@@ -44,7 +45,7 @@ function NewInvoiceInner() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setClient(null); if (clientId) api(`/clients/${clientId}`).then(setClient).catch(() => {}); }, [clientId]);
 
-  const addPackage = (t: any) => setLines((l) => [...l, { key: seq++, kind: 'PACKAGE', packageTemplateId: t.id, description: t.name, detail: t.items.map((i: any) => `${i.sessions} × ${i.treatment.name}`).join(' + ') + ` · valid ${t.validityDays} days`, qty: 1, unitPrice: Number(t.price), discount: 0, taxCategory: 'STANDARD' }]);
+  const addPackage = (t: any) => setLines((l) => [...l, { key: seq++, kind: 'PACKAGE', packageTemplateId: t.id, description: t.name, sessions: sessionsIn(t), detail: t.items.map((i: any) => `${i.sessions} × ${i.treatment.name}`).join(' + ') + ` · valid ${t.validityDays} days`, qty: 1, unitPrice: Number(t.price), discount: 0, taxCategory: 'STANDARD' }]);
   const addService = (id: string) => { const t = treatments.find((x) => x.id === id); if (t) setLines((l) => [...l, { key: seq++, kind: 'SERVICE', treatmentId: t.id, description: t.name, detail: `${t.durationMin} min`, qty: 1, unitPrice: Number(t.price), discount: 0, taxCategory: t.taxCategory }]); };
   const update = (key: number, patch: Partial<Line>) => setLines((l) => l.map((x) => (x.key === key ? { ...x, ...patch } : x)));
 
@@ -79,6 +80,11 @@ function NewInvoiceInner() {
   };
 
   const activePkgs = client?.packages?.filter((p: any) => p.status === 'ACTIVE') ?? [];
+  // Per package: how many are already on this invoice, and how many the client already owns (with sessions left).
+  const inInvoice = (id: string) => lines.filter((l) => l.packageTemplateId === id).reduce((s, l) => s + l.qty, 0);
+  const owned = (id: string) => activePkgs.filter((p: any) => p.templateId === id);
+  const left = (ps: any[]) => ps.reduce((s, p) => s + p.items.reduce((t: number, i: any) => t + i.totalSessions - i.usedSessions, 0), 0);
+  const pkgLines = lines.filter((l) => l.kind === 'PACKAGE');
 
   return (
     <>
@@ -99,13 +105,23 @@ function NewInvoiceInner() {
 
           <Card size="small" title={<span><GiftOutlined /> Package catalogue</span>} style={{ marginBottom: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 10 }}>
-              {templates.map((t) => (
-                <div key={t.id} onClick={() => addPackage(t)} className="clickable" style={{ border: '1px solid #ECEAE4', borderRadius: 10, padding: 12, background: '#FFFDF8' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><b style={{ fontSize: 13 }}>{t.name}</b><PlusOutlined className="muted" /></div>
-                  <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>{t.items.map((i: any) => `${i.sessions}× ${i.treatment.name.split(' (')[0].split(' –')[0]}`).join(' + ')}</div>
-                  <b className="tabular" style={{ color: '#7A5608' }}>{money(t.price, false)}</b> <span className="muted" style={{ fontSize: 12 }}>· {t.validityDays} days</span>
-                </div>
-              ))}
+              {templates.map((t) => {
+                const n = inInvoice(t.id), own = owned(t.id);
+                return (
+                  <Badge.Ribbon key={t.id} text={<span><CheckCircleFilled /> {n} added</span>} color="green" style={{ display: n ? undefined : 'none' }}>
+                    <div onClick={() => addPackage(t)} className="clickable" style={{ border: `1px solid ${n ? '#2E8B57' : '#ECEAE4'}`, borderRadius: 10, padding: 12, background: n ? '#F3FAF5' : '#FFFDF8', height: '100%' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><b style={{ fontSize: 13 }}>{t.name}</b>{!n && <PlusOutlined className="muted" />}</div>
+                      <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>{t.items.map((i: any) => `${i.sessions}× ${i.treatment.name.split(' (')[0].split(' –')[0]}`).join(' + ')}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <b className="tabular" style={{ color: '#7A5608' }}>{money(t.price, false)}</b>
+                        <Tag color="gold" style={{ marginInlineEnd: 0 }}>{sessionsIn(t)} sessions</Tag>
+                        <span className="muted" style={{ fontSize: 12 }}>{t.validityDays} days</span>
+                      </div>
+                      {own.length > 0 && <div style={{ fontSize: 12, marginTop: 6, color: '#2a78d6' }}>Client already has {own.length} active · {left(own)} session(s) left</div>}
+                    </div>
+                  </Badge.Ribbon>
+                );
+              })}
             </div>
             <Divider style={{ margin: '14px 0' }} />
             <Space wrap>
@@ -122,7 +138,7 @@ function NewInvoiceInner() {
                   {
                     title: 'Item', render: (_, r) => r.kind === 'OTHER'
                       ? <Input placeholder="Description" value={r.description} onChange={(e) => update(r.key, { description: e.target.value })} />
-                      : <div><b>{r.description}</b> {r.kind === 'PACKAGE' && <Tag color="gold">Package</Tag>}<div className="muted" style={{ fontSize: 12 }}>{r.detail}</div></div>,
+                      : <div><b>{r.description}</b> {r.kind === 'PACKAGE' && <Tag color="gold">Package · {r.sessions! * r.qty} sessions</Tag>}<div className="muted" style={{ fontSize: 12 }}>{r.detail}</div></div>,
                   },
                   { title: 'Qty', width: 70, render: (_, r) => <InputNumber size="small" min={1} max={20} value={r.qty} onChange={(v) => update(r.key, { qty: v ?? 1 })} style={{ width: 56 }} /> },
                   { title: 'Unit price', width: 110, render: (_, r) => <InputNumber size="small" min={0} value={r.unitPrice} onChange={(v) => update(r.key, { unitPrice: v ?? 0 })} style={{ width: 100 }} /> },
@@ -147,6 +163,12 @@ function NewInvoiceInner() {
             {[['Subtotal', calc.gross], ...(calc.disc ? [['Discount', -calc.disc]] : []), ['Taxable amount', calc.taxable], [`VAT ${vatRate}%`, calc.vat]].map(([l, v]) => (
               <div key={String(l)} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span className="muted">{l}</span><span className="tabular">{money(Number(v))}</span></div>
             ))}
+            {pkgLines.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                <span className="muted">Packages</span>
+                <span className="tabular">{pkgLines.reduce((s, l) => s + l.qty, 0)} package(s) · {pkgLines.reduce((s, l) => s + l.sessions! * l.qty, 0)} sessions</span>
+              </div>
+            )}
             <Divider style={{ margin: '8px 0' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><b>Total (AED)</b><span style={{ fontSize: 26, fontWeight: 700 }}>{money(calc.total)}</span></div>
             <Divider style={{ margin: '12px 0' }} />

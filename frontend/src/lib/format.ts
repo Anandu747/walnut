@@ -13,6 +13,8 @@ export const statusColor: Record<string, string> = Object.fromEntries(Object.ent
 
 export const INVOICE_STATUS: Record<string, string> = { DRAFT: 'default', ISSUED: 'orange', PARTIALLY_PAID: 'gold', PAID: 'green', VOID: 'default' };
 export const PACKAGE_STATUS: Record<string, string> = { ACTIVE: 'green', EXPIRED: 'red', COMPLETED: 'blue', CANCELLED: 'default' };
+/** Session progress of a sold package (derived from used vs total sessions). */
+export const PACKAGE_PROGRESS: Record<string, { label: string; color: string }> = { COMPLETED: { label: 'Completed', color: 'blue' }, ONGOING: { label: 'Ongoing', color: 'green' }, PENDING: { label: 'Pending', color: 'orange' } };
 export const ROLE_LABEL: Record<string, string> = {
   SUPER_ADMIN: 'Super Admin', MANAGER: 'Centre Manager', DOCTOR: 'Consultant / Doctor', RECEPTION: 'Front Desk', THERAPIST: 'Therapist', ACCOUNTANT: 'Accountant',
 };

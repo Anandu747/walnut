@@ -6,7 +6,7 @@ import { CalendarOutlined, CheckOutlined, MoreOutlined, PlusOutlined, WhatsAppOu
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { useApi } from '@/lib/useApi';
-import { fmtDate } from '@/lib/format';
+import { fmtDate, qs } from '@/lib/format';
 import { ClientCell, PageHeader, StatTile } from '@/components/ui';
 import BookingDrawer, { BookingInit } from '@/components/BookingDrawer';
 import ClientSelect from '@/components/ClientSelect';
@@ -20,8 +20,12 @@ export default function FollowUps() {
   const { message } = App.useApp();
   const [bucket, setBucket] = useState('overdue');
   const [type, setType] = useState<string>();
+  const [q, setQ] = useState('');
+  const [search, setSearch] = useState('');
+  useEffect(() => { const h = setTimeout(() => setSearch(q.trim()), 300); return () => clearTimeout(h); }, [q]);
   const status = bucket === 'done' ? 'DONE' : 'OPEN';
-  const { data = [], loading, reload } = useApi<any[]>(`/followups?status=${status}&bucket=${bucket === 'done' ? 'all' : bucket}${type ? `&type=${type}` : ''}`, []);
+  // A search looks across every open task (not just the selected bucket) so a client is never missed.
+  const { data = [], loading, reload } = useApi<any[]>(`/followups?${qs({ status, bucket: bucket === 'done' || search ? 'all' : bucket, type, q: search })}`, []);
   const { data: all = [], reload: reloadAll } = useApi<any[]>('/followups?status=OPEN&bucket=week', []);
   const [done, setDone] = useState<any>(null);
   const [add, setAdd] = useState(false);
@@ -52,6 +56,8 @@ export default function FollowUps() {
         <Space wrap style={{ padding: 12, borderBottom: '1px solid #ECEAE4', width: '100%' }}>
           <Segmented value={bucket} onChange={(v) => setBucket(String(v))} options={[{ value: 'overdue', label: 'Overdue' }, { value: 'today', label: 'Today' }, { value: 'week', label: 'Next 7 days' }, { value: 'all', label: 'All open' }, { value: 'done', label: 'Completed' }]} />
           <Select allowClear placeholder="Task type" style={{ width: 170 }} value={type} onChange={setType} options={Object.entries(TYPE).map(([value, t]) => ({ value, label: t.label }))} />
+          <Input.Search allowClear placeholder="Search client name or phone number" value={q} onChange={(e) => setQ(e.target.value)} onSearch={(v) => setSearch(v.trim())} style={{ width: 300 }} />
+          {search && bucket !== 'done' && bucket !== 'all' && <span className="muted" style={{ fontSize: 12 }}>Showing all open tasks matching “{search}”</span>}
         </Space>
         <Table rowKey="id" loading={loading} dataSource={data} size="middle" pagination={{ pageSize: 20 }}
           columns={[

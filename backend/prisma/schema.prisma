@@ -251,6 +251,7 @@ model Client {
   occupation         String?
   source             String?
   referredBy         String?
+  offer              String? // marketing offer / campaign the client signed up under
   emergencyName      String?
   emergencyRelation  String?
   emergencyPhone     String?
@@ -532,6 +533,7 @@ model Lead {
   gender       String?
   source       String     @default("Walk-in")
   interest     String?
+  offer        String? // marketing offer / campaign the enquiry came in on
   status       LeadStatus @default(NEW)
   notes        String?
   nextActionAt DateTime?

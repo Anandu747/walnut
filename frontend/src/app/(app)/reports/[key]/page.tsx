@@ -9,6 +9,7 @@ import { useApi } from '@/lib/useApi';
 import { REPORT_LIST } from '@/lib/nav';
 import { fmtDate, fmtDateTime, fmtTime, humanize, money, STATUS } from '@/lib/format';
 import { exportCsv } from '@/lib/export';
+import { rangePresets } from '@/lib/ranges';
 import { SERIES } from '@/lib/theme';
 import { Legend, PageHeader, StatTile, StatusTag } from '@/components/ui';
 import { ColumnChart } from '@/components/charts';
@@ -53,7 +54,7 @@ const DEFS: Record<string, Def> = {
   },
   'therapist-sessions': {
     filter: 'range', url: (f) => `/reports/therapist-sessions?${rq(f)}`, rows: (d) => d,
-    cols: [{ key: 'therapist', title: 'Therapist' }, { key: 'designation', title: 'Designation' }, n('completedSessions', 'Sessions'), n('treatmentMinutes', 'Treatment min'), n('avgMinutes', 'Avg min'), n('noShows', 'No-shows'), n('cancelled', 'Cancelled'), m('deliveredValue', 'Delivered value'), m('commission', 'Commission')],
+    cols: [{ key: 'therapist', title: 'Therapist', render: (r) => <Link href={`/reports/therapist-performance?id=${r.id}`}>{r.therapist}</Link>, csv: (r) => r.therapist }, { key: 'designation', title: 'Designation' }, n('completedSessions', 'Sessions'), n('treatmentMinutes', 'Treatment min'), n('avgMinutes', 'Avg min'), n('noShows', 'No-shows'), n('cancelled', 'Cancelled'), m('deliveredValue', 'Delivered value'), m('commission', 'Commission')],
     chart: { x: 'therapist', series: [{ key: 'completedSessions', label: 'Completed sessions', color: SERIES.gold }] },
   },
   'machine-utilisation': {
@@ -164,11 +165,7 @@ export default function ReportPage() {
     <>
       <PageHeader crumb={`Reports · ${meta.group}`} title={meta.label} sub={meta.description}
         extra={<>
-          {def.filter === 'range' && <DatePicker.RangePicker value={f.range} allowClear={false} format="DD MMM YYYY" onChange={(v) => v && setF({ ...f, range: v as [Dayjs, Dayjs] })} presets={[
-            { label: 'Today', value: [dayjs(), dayjs()] }, { label: 'Last 7 days', value: [dayjs().subtract(6, 'day'), dayjs()] }, { label: 'Month to date', value: [dayjs().startOf('month'), dayjs()] },
-            { label: 'Last month', value: [dayjs().subtract(1, 'month').startOf('month'), dayjs().subtract(1, 'month').endOf('month')] },
-            { label: 'Last quarter', value: [dayjs().subtract(3, 'month').startOf('month'), dayjs().subtract(1, 'month').endOf('month')] }, { label: 'Year to date', value: [dayjs().startOf('year'), dayjs()] },
-          ]} />}
+          {def.filter === 'range' && <DatePicker.RangePicker value={f.range} allowClear={false} format="DD MMM YYYY" onChange={(v) => v && setF({ ...f, range: v as [Dayjs, Dayjs] })} presets={rangePresets()} />}
           {def.filter === 'date' && <DatePicker value={f.date} allowClear={false} onChange={(d) => d && setF({ ...f, date: d })} format="ddd, DD MMM YYYY" />}
           {def.filter === 'days' && <Space>Expiring within <InputNumber min={0} max={365} value={f.days} onChange={(v) => setF({ ...f, days: v ?? 30 })} suffix="days" /></Space>}
           {def.filter === 'year' && <Segmented value={f.year} onChange={(v) => setF({ ...f, year: Number(v) })} options={[dayjs().year() - 1, dayjs().year()]} />}

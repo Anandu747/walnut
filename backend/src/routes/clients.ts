@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { DocKind, Prisma } from '@prisma/client';
+import { AppointmentStatus, DocKind, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { HttpError } from '../lib/http';
 import { audit } from '../lib/audit';
@@ -10,6 +10,19 @@ import { nextSeq } from '../services/billing';
 const r = Router();
 const DAY = 86_400_000;
 const opt = z.string().trim().optional().nullable();
+const PKG_APPTS = { where: { status: { notIn: ['CANCELLED', 'NO_SHOW'] as AppointmentStatus[] } }, select: { startAt: true, therapist: { select: { id: true, name: true } } } };
+type PkgAppt = { startAt: Date; therapist: { id: string; name: string } };
+
+/** Front-desk view of a package: who treats it (most recent first) and whether it is Completed, Ongoing (started) or Pending (nothing used yet). */
+function packageProgress(p: { status: string; items: { totalSessions: number; usedSessions: number; appointments: PkgAppt[] }[] }) {
+  const total = p.items.reduce((s, i) => s + i.totalSessions, 0), used = p.items.reduce((s, i) => s + i.usedSessions, 0);
+  const appts = p.items.flatMap((i) => i.appointments).sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
+  return {
+    totalSessions: total, usedSessions: used,
+    therapists: [...new Map(appts.map((a) => [a.therapist.id, a.therapist])).values()],
+    progress: p.status === 'COMPLETED' || (total > 0 && used >= total) ? 'COMPLETED' : used > 0 ? 'ONGOING' : 'PENDING',
+  };
+}
 
 async function ownClient(tenantId: string, id: string) {
   const c = await prisma.client.findFirst({ where: { id, tenantId } });
@@ -19,7 +32,7 @@ async function ownClient(tenantId: string, id: string) {
 
 const clientBody = z.object({
   title: opt, firstName: z.string().trim().min(1), middleName: opt, lastName: z.string().trim().min(1), mobile: z.string().trim().min(5), altPhone: opt, email: z.string().email().optional().nullable().or(z.literal('')),
-  dob: z.coerce.date().optional().nullable(), gender: opt, nationality: opt, emiratesId: opt, address: opt, occupation: opt, source: opt, referredBy: opt,
+  dob: z.coerce.date().optional().nullable(), gender: opt, nationality: opt, emiratesId: opt, address: opt, occupation: opt, source: opt, referredBy: opt, offer: opt,
   emergencyName: opt, emergencyRelation: opt, emergencyPhone: opt,
   medicalNotes: opt, conditions: opt, allergies: opt, medications: opt, contraindications: opt, goal: opt, targetWeightKg: z.number().positive().optional().nullable(),
   consentSigned: z.boolean().optional(), photoConsent: z.boolean().optional(), whatsappOptIn: z.boolean().optional(), marketingOptIn: z.boolean().optional(),
@@ -64,13 +77,13 @@ r.patch('/clients/:id', requireRole('RECEPTION', 'MANAGER', 'DOCTOR'), async (re
 r.get('/clients', async (req, res) => {
   const q = z.object({
     q: z.string().optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(20),
-    filter: z.enum(['all', 'active-package', 'review-due', 'no-consent', 'vip', 'new-30']).default('all'), gender: z.string().optional(), source: z.string().optional(),
+    filter: z.enum(['all', 'active-package', 'review-due', 'no-consent', 'vip', 'new-30']).default('all'), gender: z.string().optional(), source: z.string().optional(), offer: z.string().optional(),
   }).parse(req.query);
   const now = new Date();
   const where: Prisma.ClientWhereInput = {
     tenantId: req.auth.tenantId,
     ...(q.q && { OR: [{ name: { contains: q.q, mode: 'insensitive' } }, { lastName: { contains: q.q, mode: 'insensitive' } }, { mobile: { contains: q.q } }, { clientNo: { contains: q.q, mode: 'insensitive' } }, { email: { contains: q.q, mode: 'insensitive' } }, { emiratesId: { contains: q.q } }] }),
-    ...(q.gender && { gender: q.gender }), ...(q.source && { source: q.source }),
+    ...(q.gender && { gender: q.gender }), ...(q.source && { source: q.source }), ...(q.offer && { offer: q.offer }),
     ...(q.filter === 'active-package' && { packages: { some: { status: 'ACTIVE', expiresAt: { gt: now } } } }),
     ...(q.filter === 'review-due' && { nextReviewDate: { lte: new Date(now.getTime() + 3 * DAY) } }),
     ...(q.filter === 'no-consent' && { consentSigned: false }),
@@ -200,14 +213,19 @@ r.get('/clients/:id/packages', async (req, res) => {
   await ownClient(req.auth.tenantId, String(req.params.id));
   const [pkgs, reserved] = await Promise.all([
     prisma.clientPackage.findMany({
-      where: { clientId: String(req.params.id), tenantId: req.auth.tenantId }, include: { items: { include: { treatment: true } } }, orderBy: { purchasedAt: 'desc' },
+      where: { clientId: String(req.params.id), tenantId: req.auth.tenantId }, orderBy: { purchasedAt: 'desc' },
+      include: { items: { include: { treatment: true, appointments: PKG_APPTS } } },
     }),
     prisma.appointment.groupBy({ by: ['clientPackageItemId'], where: { clientId: String(req.params.id), tenantId: req.auth.tenantId, status: { in: ['SCHEDULED', 'CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS'] }, clientPackageItemId: { not: null } }, _count: true }),
   ]);
   const booked = new Map(reserved.map((x) => [x.clientPackageItemId, x._count]));
-  res.json(pkgs.map((p) => ({
-    ...p, items: p.items.map((i) => ({ ...i, booked: booked.get(i.id) ?? 0, remaining: i.totalSessions - i.usedSessions, bookable: i.totalSessions - i.usedSessions - (booked.get(i.id) ?? 0) })),
-  })));
+  res.json(pkgs.map((p) => {
+    const { therapists, progress } = packageProgress(p);
+    return {
+      ...p, therapists, progress,
+      items: p.items.map(({ appointments, ...i }) => ({ ...i, booked: booked.get(i.id) ?? 0, remaining: i.totalSessions - i.usedSessions, bookable: i.totalSessions - i.usedSessions - (booked.get(i.id) ?? 0) })),
+    };
+  }));
 });
 
 /** Manager-only: extend validity or freeze/cancel a package (auditable). */
@@ -227,13 +245,23 @@ r.get('/client-packages', async (req, res) => {
       tenantId: req.auth.tenantId, ...(q.status && { status: q.status }),
       ...(q.expiringDays !== undefined && { status: 'ACTIVE', expiresAt: { lte: new Date(Date.now() + q.expiringDays * DAY) } }),
     },
-    include: { client: { select: { id: true, name: true, clientNo: true, mobile: true } }, items: { include: { treatment: { select: { name: true } } } } },
+    include: {
+      client: { select: { id: true, name: true, clientNo: true, mobile: true } },
+      items: {
+        include: {
+          treatment: { select: { name: true } },
+          appointments: PKG_APPTS,
+        },
+      },
+    },
     orderBy: { purchasedAt: 'desc' }, take: 500,
   });
   res.json(pkgs.map((p) => {
-    const total = p.items.reduce((s, i) => s + i.totalSessions, 0);
-    const used = p.items.reduce((s, i) => s + i.usedSessions, 0);
-    return { ...p, totalSessions: total, usedSessions: used, unfulfilledValue: total ? Math.round(Number(p.price) * (total - used) / total * 100) / 100 : 0 };
+    const { totalSessions: total, usedSessions: used, therapists, progress } = packageProgress(p);
+    return {
+      ...p, items: p.items.map(({ appointments, ...i }) => i), therapists, progress,
+      totalSessions: total, usedSessions: used, unfulfilledValue: total ? Math.round(Number(p.price) * (total - used) / total * 100) / 100 : 0,
+    };
   }));
 });
 

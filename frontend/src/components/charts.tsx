@@ -21,8 +21,9 @@ function useWidth<T extends HTMLElement>() {
   return { ref, w };
 }
 
+// Never below 4 so the five gridlines stay on whole numbers for small counts / empty ranges.
 function niceMax(v: number) {
-  if (v <= 0) return 1;
+  if (v <= 4) return 4;
   const p = Math.pow(10, Math.floor(Math.log10(v)));
   const n = v / p;
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
@@ -78,7 +79,7 @@ export function ColumnChart({ data, x, series, height = 240, format = (v: number
           return (
             <g key={t}>
               <line x1={pad.l} x2={w - pad.r} y1={y} y2={y} stroke={t === 0 ? INK.axis : INK.grid} strokeWidth={1} />
-              <text x={pad.l - 8} y={y + 4} textAnchor="end" fontSize={11} fill={INK.muted} className="tabular">{compact(t)}</text>
+              <text x={pad.l - 8} y={y + 4} textAnchor="end" fontSize={11} fill={INK.muted} className="tabular">{Number.isInteger(t) || t >= 100 ? compact(t) : t.toFixed(1)}</text>
             </g>
           );
         })}
